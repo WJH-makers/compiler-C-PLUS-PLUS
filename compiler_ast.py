@@ -182,3 +182,35 @@ class CallExpression(ASTNode):
         self.args = args # List of expression nodes
     def __repr__(self): return f"CallExpression(function={self.function}, args={self.args})"
 
+
+class ArraySubscript(ASTNode):
+    """ Represents array subscript expressions, e.g., arr[index]. """
+
+    def __init__(self, array_expr, index_expr, line=None, column=None):
+        # Location info typically corresponds to the '[' token
+        super().__init__(line, column)
+        # Expression that results in the array/pointer being accessed
+        self.array_expression = array_expr
+        # Expression inside the square brackets
+        self.index_expression = index_expr
+
+    def __repr__(self):
+        return f"ArraySubscript(array={self.array_expression}, index={self.index_expression})"
+
+
+class MemberAccess(ASTNode):
+    """ Represents member access using '.' or '->'. """
+
+    def __init__(self, object_or_pointer_expr, member_identifier, is_pointer, line=None, column=None):
+        # Location info typically corresponds to the '.' or '->' token
+        super().__init__(line, column)
+        # Expression for the object or pointer before the operator
+        self.object_or_pointer_expression = object_or_pointer_expr
+        # Identifier node for the member name
+        self.member_identifier = member_identifier
+        # Boolean flag: True if access is via '->', False if via '.'
+        self.is_pointer_access = is_pointer
+
+    def __repr__(self):
+        op = '->' if self.is_pointer_access else '.'
+        return f"MemberAccess(object={self.object_or_pointer_expression}, member='{self.member_identifier.name}', op='{op}')"
