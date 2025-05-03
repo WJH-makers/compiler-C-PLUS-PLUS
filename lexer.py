@@ -1,7 +1,7 @@
 # coding=utf-8
 import logging
-import sys
 import re
+import sys
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -75,7 +75,7 @@ class Lexer:
             ('BIN_INTEGER', r'0[bB][01]+(\'[01]+)*[uUlL]*'),
 
             ('HEX_INTEGER', r'0[xX][0-9a-fA-F]+(\'[0-9a-fA-F]+)*[uUlL]*'),
-            # Floating Point Literal (handle . and e/E, include digit separators) - Before Octal/Decimal if starts with digit
+
             ('FLOAT_LITERAL',
              r'(([0-9]+(\'[0-9]+)*\.[0-9]*(\'[0-9]+)*|\.[0-9]+(\'[0-9]+)*)([eE][+-]?[0-9]+(\'[0-9]+)*)?|[0-9]+(\'[0-9]+)*[eE][+-]?[0-9]+(\'[0-9]+)*)[fFlL]?'),
 
@@ -90,8 +90,6 @@ class Lexer:
         self.master_regex = re.compile('|'.join(f'(?P<{name}>{pattern})' for name, pattern in self.token_specs), re.DOTALL) # Use re.DOTALL for multi-line comments/strings
 
     def _interpret_escapes(self, s):
-        """Interprets standard C/C++ escape sequences in non-raw string/char literals."""
-        # Note: Does not handle universal character names (\uXXXX, \UXXXXXXXX) or \0 followed by non-octal digits properly.
         escape_map = {
             '\\n': '\n', '\\t': '\t', '\\r': '\r', '\\\\': '\\',
             '\\\'': '\'', '\\"': '"', '\\a': '\a', '\\b': '\b',
@@ -109,7 +107,6 @@ class Lexer:
                         continue
                     elif s[i+1] >= '0' and s[i+1] <= '7':
                         j = i + 1
-                        # Greedily match up to 3 octal digits
                         while j < len(s) and s[j] >= '0' and s[j] <= '7' and (j - i - 1) < 3:
                             j += 1
                         octal_val = int(s[i+1:j], 8)
@@ -136,8 +133,6 @@ class Lexer:
         return out
 
     def _get_original_line(self, processed_line_num):
-        """Looks up the original line number from the mapping."""
-        # Dictionary lookup is efficient
         original_line = self.line_mapping.get(processed_line_num)
         if original_line is None:
             logging.warning(
@@ -156,7 +151,6 @@ class Lexer:
             value = match.group(kind)
             start_column = self.column
             current_original_line = self._get_original_line(self.processed_line)
-
             if kind in ['COMMENT_MULTI', 'COMMENT_SINGLE', 'NEWLINE', 'WHITESPACE']:
                 lines_in_match = value.count('\n')
                 if lines_in_match > 0:
@@ -165,8 +159,7 @@ class Lexer:
                 else:
                     self.column += len(value)
                 self.position = match.end()
-                continue # Skip these tokens
-
+                continue
             token_type = kind
 
             if kind in ['OPERATOR_3CHAR', 'OPERATOR_2CHAR', 'OPERATOR_1CHAR', 'OPERATOR_ELLIPSIS']:
@@ -178,9 +171,9 @@ class Lexer:
                 prefix_match = re.match(r'(u8|[uUL])?', value)
                 prefix_len = prefix_match.end() if prefix_match else 0
                 char_content = value[prefix_len + 1 : -1]
-                value = self._interpret_escapes(char_content) # Store interpreted value
+                value = self._interpret_escapes(char_content)
             elif kind == 'STRING_LITERAL':
-                token_type = 'STRING_LITERAL' # Keep distinct from CHAR
+                token_type = 'STRING_LITERAL'
                 prefix_match = re.match(r'(u8|[uUL])?', value)
                 prefix_len = prefix_match.end() if prefix_match else 0
                 string_content = value[prefix_len + 1 : -1]
@@ -189,7 +182,7 @@ class Lexer:
                  token_type = 'RAW_STRING_LITERAL'
                  value = match.group('content')
             elif kind in ['HEX_INTEGER', 'OCT_INTEGER', 'DEC_INTEGER', 'BIN_INTEGER']:
-                token_type = 'INTEGER_LITERAL' # Group all integer types
+                token_type = 'INTEGER_LITERAL'
             elif kind == 'FLOAT_LITERAL':
                 token_type = 'FLOAT_LITERAL'
             elif kind == 'IDENTIFIER':
