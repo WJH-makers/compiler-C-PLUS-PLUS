@@ -1,3 +1,7 @@
+# coding=utf-8
+import sys
+
+
 class ASTNode:
     def __init__(self, line=None, column=None):
         # Store location info for better error messages/debugging
@@ -24,7 +28,7 @@ class Parameter(ASTNode):
     def __init__(self, param_type, name, line=None, column=None):
         super().__init__(line, column)
         self.param_type = param_type # TypeNode or string
-        self.name = name # Identifier
+        self.name = name  # Identifier or None
     def __repr__(self): return f"Parameter(type={self.param_type}, name={self.name})"
 
 # --- Statements ---
@@ -35,8 +39,6 @@ class CompoundStatement(ASTNode):
     def __repr__(self): return f"CompoundStatement({self.statements})"
 
 class DeclarationStatement(ASTNode):
-    # Note: In C, declarations can have multiple declarators (int x, *y;).
-    # This basic version handles one name per declaration statement.
     def __init__(self, decl_type, name, initializer=None, line=None, column=None):
         super().__init__(line, column)
         self.decl_type = decl_type # TypeNode or string
@@ -45,19 +47,18 @@ class DeclarationStatement(ASTNode):
     def __repr__(self): return f"DeclarationStatement(type={self.decl_type}, name={self.name}, init={self.initializer})"
 
 class AssignmentStatement(ASTNode):
+    # Note: This specific node might be less used if '=' is handled by BinaryOp
     def __init__(self, lvalue, expression, line=None, column=None):
         super().__init__(line, column)
-        self.lvalue = lvalue # Typically Identifier, could be more complex (e.g., array access)
+        self.lvalue = lvalue
         self.expression = expression
     def __repr__(self): return f"AssignmentStatement(lvalue={self.lvalue}, expr={self.expression})"
 
 class ExpressionStatement(ASTNode):
-    """Represents an expression used as a statement (e.g., func(); x++;)."""
     def __init__(self, expression, line=None, column=None):
         super().__init__(line, column)
         self.expression = expression
     def __repr__(self): return f"ExpressionStatement({self.expression})"
-
 
 class IfStatement(ASTNode):
     def __init__(self, condition, then_branch, else_branch=None, line=None, column=None):
@@ -74,21 +75,20 @@ class WhileStatement(ASTNode):
         self.body = body
     def __repr__(self): return f"WhileStatement(cond={self.condition}, body={self.body})"
 
-# --- NEW STATEMENT NODES ---
 class ForStatement(ASTNode):
     def __init__(self, init, condition, update, body, line=None, column=None):
         super().__init__(line, column)
-        self.init = init # Optional: DeclarationStatement or ExpressionStatement/Expression
-        self.condition = condition # Optional: Expression
-        self.update = update # Optional: Expression
-        self.body = body # Statement
+        self.init = init
+        self.condition = condition
+        self.update = update
+        self.body = body
     def __repr__(self): return f"ForStatement(init={self.init}, cond={self.condition}, update={self.update}, body={self.body})"
 
 class DoWhileStatement(ASTNode):
     def __init__(self, body, condition, line=None, column=None):
         super().__init__(line, column)
-        self.body = body # Statement
-        self.condition = condition # Expression
+        self.body = body
+        self.condition = condition
     def __repr__(self): return f"DoWhileStatement(body={self.body}, cond={self.condition})"
 
 class BreakStatement(ASTNode):
@@ -97,12 +97,10 @@ class BreakStatement(ASTNode):
 class ContinueStatement(ASTNode):
      def __repr__(self): return "ContinueStatement"
 
-# CallStatement removed, use CallExpression within ExpressionStatement
-
 class ReturnStatement(ASTNode):
     def __init__(self, value=None, line=None, column=None):
         super().__init__(line, column)
-        self.value = value # Optional expression node
+        self.value = value
     def __repr__(self): return f"ReturnStatement(value={self.value})"
 
 # --- Expressions ---
@@ -115,19 +113,22 @@ class Identifier(ASTNode):
 class IntegerLiteral(ASTNode):
     def __init__(self, value, line=None, column=None):
         super().__init__(line, column)
-        # Store original string value from lexer
-        self.raw_value = value
+        self.raw_value = value  # Keep original string
         try:
-            if value.lower().startswith('0x'):
-                 self.value = int(value, 16)
-            elif value.startswith('0') and len(value) > 1:
-                 self.value = int(value, 8)
+            # Determine base and clean suffixes
+            val_str = value.lower().rstrip('ul')
+            if val_str.startswith('0x'):
+                self.value = int(val_str, 16)
+            elif val_str.startswith('0b'):
+                self.value = int(val_str, 2)
+            elif val_str.startswith('0') and len(val_str) > 1:
+                self.value = int(val_str, 8)
             else:
-                 self.value = int(value)
+                self.value = int(val_str, 10)
         except ValueError:
-            # Handle potential suffixes like L, U here if needed, or raise error
-            self.value = int(value.rstrip('uUlL'), 10) # Basic suffix removal
-            # Store suffix info?
+            # Fallback or error
+            print(f"Warning: Could not parse integer literal '{value}'", file=sys.stderr)
+            self.value = 0
     def __repr__(self): return f"IntegerLiteral(value={self.value})"
 
 class FloatLiteral(ASTNode):
@@ -135,82 +136,75 @@ class FloatLiteral(ASTNode):
         super().__init__(line, column)
         self.raw_value = value
         try:
-            # Basic suffix removal
              self.value = float(value.rstrip('fFlL'))
         except ValueError:
-             self.value = float('nan') # Error case
+            self.value = float('nan')
     def __repr__(self): return f"FloatLiteral(value={self.value})"
 
 class StringLiteral(ASTNode):
     def __init__(self, value, line=None, column=None):
         super().__init__(line, column)
-        # Assume lexer already handled escapes
-        self.value = value
+        self.value = value  # Assumes lexer handled escapes
     def __repr__(self): return f"StringLiteral(value={repr(self.value)})"
 
-class CharLiteral(ASTNode): # NEW
+
+class CharLiteral(ASTNode):
     def __init__(self, value, line=None, column=None):
         super().__init__(line, column)
-         # Assume lexer already handled escapes
-        self.value = value
+        self.value = value  # Assumes lexer handled escapes
     def __repr__(self): return f"CharLiteral(value={repr(self.value)})"
-
 
 class BinaryOp(ASTNode):
     def __init__(self, op, left, right, line=None, column=None):
-        # Use operator token's location
         super().__init__(line, column)
-        self.op = op # String representation of operator
+        self.op = op
         self.left = left
         self.right = right
     def __repr__(self): return f"BinaryOp(op='{self.op}', left={self.left}, right={self.right})"
 
-# --- NEW EXPRESSION NODES ---
 class UnaryOp(ASTNode):
     def __init__(self, op, operand, line=None, column=None):
-         # Use operator token's location
         super().__init__(line, column)
-        self.op = op # String representation of operator
-        self.operand = operand
+        self.op = op
+        self.operand = operand  # Can be expression node or string (for sizeof(type))
     def __repr__(self): return f"UnaryOp(op='{self.op}', operand={self.operand})"
 
 class CallExpression(ASTNode):
     def __init__(self, function, args, line=None, column=None):
-        # Use function identifier's location
         super().__init__(line, column)
-        self.function = function # Identifier or potentially complex expression
-        self.args = args # List of expression nodes
+        self.function = function
+        self.args = args
     def __repr__(self): return f"CallExpression(function={self.function}, args={self.args})"
 
-
 class ArraySubscript(ASTNode):
-    """ Represents array subscript expressions, e.g., arr[index]. """
-
-    def __init__(self, array_expr, index_expr, line=None, column=None):
-        # Location info typically corresponds to the '[' token
+    def __init__(self, array_expression, index_expression, line=None, column=None):
         super().__init__(line, column)
-        # Expression that results in the array/pointer being accessed
-        self.array_expression = array_expr
-        # Expression inside the square brackets
-        self.index_expression = index_expr
+        self.array_expression = array_expression
+        self.index_expression = index_expression
 
-    def __repr__(self):
-        return f"ArraySubscript(array={self.array_expression}, index={self.index_expression})"
-
+    def __repr__(self): return f"ArraySubscript(array={self.array_expression}, index={self.index_expression})"
 
 class MemberAccess(ASTNode):
-    """ Represents member access using '.' or '->'. """
-
-    def __init__(self, object_or_pointer_expr, member_identifier, is_pointer, line=None, column=None):
-        # Location info typically corresponds to the '.' or '->' token
+    def __init__(self, object_or_pointer_expression, member_identifier, is_pointer, line=None, column=None):
         super().__init__(line, column)
-        # Expression for the object or pointer before the operator
-        self.object_or_pointer_expression = object_or_pointer_expr
-        # Identifier node for the member name
+        self.object_or_pointer_expression = object_or_pointer_expression
         self.member_identifier = member_identifier
-        # Boolean flag: True if access is via '->', False if via '.'
         self.is_pointer_access = is_pointer
-
     def __repr__(self):
         op = '->' if self.is_pointer_access else '.'
         return f"MemberAccess(object={self.object_or_pointer_expression}, member='{self.member_identifier.name}', op='{op}')"
+
+
+# --- <<< ADDED CastExpression Node >>> ---
+class CastExpression(ASTNode):
+    """Represents a C-style cast expression: (type)expression"""
+
+    def __init__(self, target_type, expression, line=None, column=None):
+        # Location info likely corresponds to the opening parenthesis of the cast
+        super().__init__(line, column)
+        self.target_type = target_type  # String representing the type to cast to
+        self.expression = expression  # Node representing the expression being casted
+
+    def __repr__(self):
+        return f"CastExpression(type='{self.target_type}', expr={self.expression})"
+# --- <<< END of CastExpression Node >>> ---

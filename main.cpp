@@ -1,5 +1,4 @@
 #include <iostream>
-#include <string>
 #define NUM 1
 #define PI 3.1415926
 #define add(x, y) ((x) + (y))
@@ -14,7 +13,16 @@
 using namespace std;
 
 void printMessage(const char* msg) {
-    cout << "[消息] " << msg << endl;
+    cout << "[消息]" << msg << endl;
+}
+
+string to_string(int num) {
+    string str_num="";
+    while(num>0){
+        str_num += (char)((num % 10) + '0');
+        num/=10;
+    }
+    return str_num;
 }
 
 int main() {

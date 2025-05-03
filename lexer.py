@@ -33,10 +33,11 @@ class Lexer:
         self.column = 1
         self.tokens = []
         self.line_mapping = line_mapping
+        # <<< MODIFIED KEYWORDS SET >>>
         self.keywords = {
             'auto', 'break', 'case', 'char', 'const', 'continue', 'default', 'do',
             'double', 'else', 'enum', 'extern', 'float', 'for', 'goto', 'if',
-            'inline', 'int', 'long', 'register', 'restrict', 'return', 'short',
+            'inline', 'int', 'long', 'string', 'register', 'restrict', 'return', 'short',
             'signed', 'sizeof', 'static', 'struct', 'switch', 'typedef', 'union',
             'unsigned', 'void', 'volatile', 'while',
             '_Bool', '_Complex', '_Imaginary',
@@ -50,93 +51,74 @@ class Lexer:
             'wchar_t', 'xor', 'xor_eq',
         }
         self.token_specs = [
-
+            # --- Regex patterns remain the same ---
             ('COMMENT_MULTI', r'/\*.*?\*/'),
             ('COMMENT_SINGLE', r'//.*'),
-
             ('NEWLINE', r'\n'),
             ('WHITESPACE', r'[ \t\r\f\v]+'),
-
             ('RAW_STRING_LITERAL', r'R"((?P<delim>[^()\s]{0,16}))\((?P<content>.*?)\)\1"'),
-
-            ('CHAR_LITERAL', r'(u8|[uUL])?\'([^\\\'\n]|\\([nrtv\\\'\"?abf0]|x[0-9a-fA-F]{1,2}|[0-7]{1,3}))\''), # Added \n to forbidden list inside ''
-
-            ('STRING_LITERAL', r'(u8|[uUL])?\"([^\\\"\n]|\\([nrtv\\\'\"?abf0]|x[0-9a-fA-F]{1,2}|[0-7]{1,3}))*\"'), # Added \n to forbidden list inside ""
-
+            ('CHAR_LITERAL', r'(u8|[uUL])?\'([^\\\'\n]|\\([nrtv\\\'\"?abf0]|x[0-9a-fA-F]{1,2}|[0-7]{1,3}))\''),
+            ('STRING_LITERAL', r'(u8|[uUL])?\"([^\\\"\n]|\\([nrtv\\\'\"?abf0]|x[0-9a-fA-F]{1,2}|[0-7]{1,3}))*\"'),
             ('OPERATOR_3CHAR', r'<<=|>>='),
             ('OPERATOR_ELLIPSIS', r'\.\.\.'),
-
             ('OPERATOR_2CHAR', r'->|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\||\+=|-=|\*=|/=|%=|&=|\|=|\^=|::'),
-
             ('OPERATOR_1CHAR', r'[+\-*/%&|^~!<>=?,.:]'),
-
             ('PUNCTUATOR', r'[{}();\[\]]'),
-
             ('BIN_INTEGER', r'0[bB][01]+(\'[01]+)*[uUlL]*'),
-
             ('HEX_INTEGER', r'0[xX][0-9a-fA-F]+(\'[0-9a-fA-F]+)*[uUlL]*'),
-
             ('FLOAT_LITERAL',
              r'(([0-9]+(\'[0-9]+)*\.[0-9]*(\'[0-9]+)*|\.[0-9]+(\'[0-9]+)*)([eE][+-]?[0-9]+(\'[0-9]+)*)?|[0-9]+(\'[0-9]+)*[eE][+-]?[0-9]+(\'[0-9]+)*)[fFlL]?'),
-
             ('OCT_INTEGER', r'0[0-7]+(\'[0-7]+)*[uUlL]*'),
-
             ('DEC_INTEGER', r'[0-9]+(\'[0-9]+)*[uUlL]*'),
-
-            ('IDENTIFIER', r'[a-zA-Z_][a-zA-Z0-9_]*'),
-
+            ('IDENTIFIER', r'[a-zA-Z_][a-zA-Z0-9_]*'),  # Matches keywords too initially
             ('MISMATCH', r'.')
         ]
-        self.master_regex = re.compile('|'.join(f'(?P<{name}>{pattern})' for name, pattern in self.token_specs), re.DOTALL) # Use re.DOTALL for multi-line comments/strings
+        self.master_regex = re.compile('|'.join(f'(?P<{name}>{pattern})' for name, pattern in self.token_specs),
+                                       re.DOTALL)
 
     def _interpret_escapes(self, s):
-        escape_map = {
-            '\\n': '\n', '\\t': '\t', '\\r': '\r', '\\\\': '\\',
-            '\\\'': '\'', '\\"': '"', '\\a': '\a', '\\b': '\b',
-            '\\f': '\f', '\\v': '\v', '\\?': '?' # Added common ones
-        }
-        out = ""
+        # ... (保持不变) ...
+        escape_map = {'\\n': '\n', '\\t': '\t', '\\r': '\r', '\\\\': '\\', '\\\'': '\'', '\\"': '"', '\\a': '\a',
+                      '\\b': '\b', '\\f': '\f', '\\v': '\v', '\\?': '?'}
+        out = "";
         i = 0
         while i < len(s):
             if s[i] == '\\':
                 if i + 1 < len(s):
                     esc2 = s[i:i + 2]
                     if esc2 in escape_map:
-                        out += escape_map[esc2]
-                        i += 2
+                        out += escape_map[esc2];
+                        i += 2;
                         continue
-                    elif s[i+1] >= '0' and s[i+1] <= '7':
+                    elif s[i + 1] >= '0' and s[i + 1] <= '7':
                         j = i + 1
-                        while j < len(s) and s[j] >= '0' and s[j] <= '7' and (j - i - 1) < 3:
-                            j += 1
-                        octal_val = int(s[i+1:j], 8)
-                        out += chr(octal_val)
-                        i = j
+                        while j < len(s) and s[j] >= '0' and s[j] <= '7' and (j - i - 1) < 3: j += 1
+                        octal_val = int(s[i + 1:j], 8);
+                        out += chr(octal_val);
+                        i = j;
                         continue
-                    elif s[i+1] in ('x', 'X') and i + 2 < len(s) and s[i+2] in '0123456789abcdefABCDEF':
+                    elif s[i + 1] in ('x', 'X') and i + 2 < len(s) and s[i + 2] in '0123456789abcdefABCDEF':
                         j = i + 2
-                        while j < len(s) and s[j] in '0123456789abcdefABCDEF':
-                            j += 1
-                        if j == i + 2:
-                             out += s[i:j]
-                             i = j
-                             continue
-                        hex_val = int(s[i+2:j], 16)
-                        out += chr(hex_val)
-                        i = j
-                        continue
-                out += s[i:i+2] if i + 1 < len(s) else s[i]
-                i += 2 if i + 1 < len(s) else 1
+                        while j < len(s) and s[j] in '0123456789abcdefABCDEF': j += 1
+                        if j > i + 2:  # Check if at least one hex digit was found
+                            hex_val = int(s[i + 2:j], 16);
+                            out += chr(hex_val);
+                            i = j;
+                            continue
+                # If escape sequence is invalid or incomplete, treat literally? Or error?
+                # Current behavior treats invalid escapes like '\\z' literally as '\' and 'z'
+                out += s[i];
+                i += 1  # Treat backslash literally if escape is invalid
             else:
-                out += s[i]
+                out += s[i];
                 i += 1
         return out
 
     def _get_original_line(self, processed_line_num):
+        # ... (保持不变) ...
         original_line = self.line_mapping.get(processed_line_num)
         if original_line is None:
-            logging.warning(
-                f"No original line mapping found for processed line {processed_line_num}. Using processed line number.")
+            logging.warning(f"No original line mapping for processed L{processed_line_num}.")
             return processed_line_num
         return original_line
 
@@ -145,22 +127,30 @@ class Lexer:
             match = self.master_regex.match(self.code, self.position)
             if not match:
                 original_error_line = self._get_original_line(self.processed_line)
-                raise LexerError(f"Unable to match token starting at position {self.position}", original_error_line, self.column)
+                raise LexerError(
+                    f"Unable to match token starting near '{self.code[self.position:self.position + 10]}...'",
+                    original_error_line, self.column)
 
             kind = match.lastgroup
             value = match.group(kind)
             start_column = self.column
             current_original_line = self._get_original_line(self.processed_line)
+
+            # --- Skip whitespace and comments ---
             if kind in ['COMMENT_MULTI', 'COMMENT_SINGLE', 'NEWLINE', 'WHITESPACE']:
                 lines_in_match = value.count('\n')
                 if lines_in_match > 0:
                     self.processed_line += lines_in_match
-                    self.column = len(value.rsplit('\n', 1)[1]) + 1
+                    # Calculate column after the last newline
+                    self.column = len(value) - value.rfind('\n')
                 else:
-                    self.column += len(value)
+                    self.column += len(value)  # No newline, just advance column
                 self.position = match.end()
-                continue
-            token_type = kind
+                continue  # Skip to next token
+
+            # --- Determine Token Type and Value ---
+            token_type = None
+            token_value = value  # Default value is the matched string
 
             if kind in ['OPERATOR_3CHAR', 'OPERATOR_2CHAR', 'OPERATOR_1CHAR', 'OPERATOR_ELLIPSIS']:
                 token_type = 'OPERATOR'
@@ -168,78 +158,94 @@ class Lexer:
                 token_type = 'PUNCTUATOR'
             elif kind == 'CHAR_LITERAL':
                 token_type = 'CHAR_LITERAL'
-                prefix_match = re.match(r'(u8|[uUL])?', value)
+                prefix_match = re.match(r'(u8|[uUL])?', token_value)
                 prefix_len = prefix_match.end() if prefix_match else 0
-                char_content = value[prefix_len + 1 : -1]
-                value = self._interpret_escapes(char_content)
+                char_content = token_value[prefix_len + 1: -1]  # Extract content within ''
+                token_value = self._interpret_escapes(char_content)  # Interpret escapes
             elif kind == 'STRING_LITERAL':
                 token_type = 'STRING_LITERAL'
-                prefix_match = re.match(r'(u8|[uUL])?', value)
+                prefix_match = re.match(r'(u8|[uUL])?', token_value)
                 prefix_len = prefix_match.end() if prefix_match else 0
-                string_content = value[prefix_len + 1 : -1]
-                value = self._interpret_escapes(string_content)
+                string_content = token_value[prefix_len + 1: -1]  # Extract content within ""
+                token_value = self._interpret_escapes(string_content)  # Interpret escapes
             elif kind == 'RAW_STRING_LITERAL':
-                 token_type = 'RAW_STRING_LITERAL'
-                 value = match.group('content')
+                token_type = 'STRING_LITERAL'  # Treat raw string as regular string literal token type
+                token_value = match.group('content')  # Value is just the content part
             elif kind in ['HEX_INTEGER', 'OCT_INTEGER', 'DEC_INTEGER', 'BIN_INTEGER']:
                 token_type = 'INTEGER_LITERAL'
+                # Value conversion happens in AST node __init__
             elif kind == 'FLOAT_LITERAL':
                 token_type = 'FLOAT_LITERAL'
+                # Value conversion happens in AST node __init__
             elif kind == 'IDENTIFIER':
-                token_type = 'KEYWORD' if value in self.keywords else 'IDENTIFIER'
+                # <<< --- Check if it's a keyword NOW --- >>>
+                token_type = 'KEYWORD' if token_value in self.keywords else 'IDENTIFIER'
             elif kind == 'MISMATCH':
-                raise LexerError(f"Illegal character encountered: '{value}'", current_original_line, start_column)
+                raise LexerError(f"Illegal character encountered: '{token_value}'", current_original_line, start_column)
             else:
+                # Should not happen if regex covers all cases + MISMATCH
                 raise LexerError(f"Unhandled token kind: {kind}", current_original_line, start_column)
 
+            # Create and append token
+            self.tokens.append(Token(token_type, token_value, current_original_line, start_column))
 
-            self.tokens.append(Token(token_type, value, current_original_line, start_column))
-            self.column += len(value)
+            # Update position and column
+            # Column update needs care if value contains newlines (e.g., raw strings, block comments if not skipped)
+            lines_in_value = token_value.count('\n')  # Should be 0 for most non-skipped tokens
+            if lines_in_value > 0:
+                self.processed_line += lines_in_value
+                self.column = len(token_value) - token_value.rfind('\n')
+            else:
+                self.column += len(match.group(kind))  # Advance by raw matched length
+
             self.position = match.end()
 
+        # Add EOF token at the end
         eof_original_line = self._get_original_line(self.processed_line)
         self.tokens.append(Token("EOF", "", eof_original_line, self.column))
         return self.tokens
 
 
+# --- Main block for testing lexer ---
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("用法: python lexer.py <input_file.cpp>")
         sys.exit(1)
 
     input_file_path = sys.argv[1]
+    raw_code = None
     processed_code = None
-    line_map = {}  # Default empty map
+    line_map = {}
 
     try:
         logging.info(f"正在读取文件: {input_file_path}")
         with open(input_file_path, 'r', encoding='utf-8') as infile:
-            code = infile.read()
-
+            raw_code = infile.read()
+        # ... (Preprocessing logic remains the same) ...
         try:
             from preprocess import BasicPreprocessor
+
             logging.info("正在尝试运行预处理器...")
             preprocessor = BasicPreprocessor()
-            processed_code, line_map = preprocessor.process(code) # Pass filename for preprocessor # Added filename
+            processed_code, line_map = preprocessor.process(raw_code)
             logging.info("预处理完成.")
         except ImportError:
             logging.warning("警告: 找不到 preprocess.py。将对原始代码进行词法分析 (无行号映射)。")
-            processed_code = code
-            num_lines = code.count('\n') + 1
+            processed_code = raw_code;
+            num_lines = raw_code.count('\n') + 1;
             line_map = {i: i for i in range(1, num_lines + 1)}
         except Exception as e:
-            logging.error(f"预处理时发生错误: {e}。将对原始代码进行词法分析 (无行号映射)。", exc_info=True) # Log traceback
-            processed_code = code
-            num_lines = code.count('\n') + 1
+            logging.error(f"预处理时发生错误: {e}。将对原始代码进行词法分析 (无行号映射)。", exc_info=True)
+            processed_code = raw_code;
+            num_lines = raw_code.count('\n') + 1;
             line_map = {i: i for i in range(1, num_lines + 1)}
-
 
         if processed_code is not None:
             logging.info("正在进行词法分析...")
             lexer = Lexer(processed_code, line_map)
-            tokens = lexer.tokenize()
+            tokens = lexer.tokenize()  # Returns list
             logging.info("词法分析完成.")
-            print("\n词法分析结果:")
+            print("\n词法分析结果 (Tokens):")
             for token in tokens:
                 print(token)
         else:
@@ -247,11 +253,11 @@ if __name__ == "__main__":
             sys.exit(1)
 
     except FileNotFoundError:
-        logging.error(f"错误: 文件 '{input_file_path}' 未找到")
+        logging.error(f"错误: 文件 '{input_file_path}' 未找到");
         sys.exit(1)
     except LexerError as e:
-        logging.error(e)
+        logging.error(e);
         sys.exit(1)
     except Exception as e:
-        logging.error(f"发生未预料的错误: {e}", exc_info=True)
+        logging.error(f"发生未预料的错误: {e}", exc_info=True);
         sys.exit(1)
