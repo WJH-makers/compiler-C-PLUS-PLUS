@@ -18,9 +18,24 @@ void printMessage(const char* msg) {
 
 string to_string(int num) {
     string str_num="";
-    while(num>0){
-        str_num += (char)((num % 10) + '0');
+    int ori=num;
+    int digit=0; // 记录数字的位数
+    if(num<0){
+        str_num += '-';
+        num = -num;
+    }
+    if(num==0){
+        return '0';
+    }
+    while(num!=0){
+        digit++;
         num/=10;
+    }
+    num=ori;
+    while(digit!=0){
+        str_num+=(char)(num/(10^(digit-1))+'0');
+        num-=(num/(10^(digit-1)))*(10^(digit-1));
+        digit--;
     }
     return str_num;
 }
@@ -32,6 +47,9 @@ int main() {
     num = minus(minus(minus(num,1),1), 1);
     if(num>0){
         printMessage("num大于0");
+    }
+    else{
+    printMessage("num小于等于0");
     }
     while(num-->0){
         printMessage(to_string(num));

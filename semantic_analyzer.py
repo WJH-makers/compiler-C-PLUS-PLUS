@@ -753,11 +753,8 @@ class SemanticAnalyzer:
             logging.warning(f"Allowing potentially unsafe pointer cast from '{expr_type}' to '{target_type}'.")
             return target_type  # 返回目标指针类型
 
-        # 默认: 已实现规则不允许转换
         self.error(f"Invalid C-style cast from type '{expr_type}' to '{target_type}'", node)
         return "error_type"
-
-    # --- <<< END visit_CastExpression >>> ---
 
     def visit_CallExpression(self, node):
         """分析函数调用，检查参数，返回返回类型。"""
@@ -770,10 +767,6 @@ class SemanticAnalyzer:
         arg_types = [self.visit(arg) for arg in node.args]
         if "error_type" in arg_types:
             return "error_type"
-
-        func_symbol = None
-        expected_param_defs = None
-        expected_return_type = "error_type"
 
         if isinstance(func_expr_node, Identifier):
             func_name = func_expr_node.name
@@ -807,53 +800,6 @@ class SemanticAnalyzer:
         else:
             self.error(f"Expression of type '{called_expr_type}' is not callable", func_expr_node)
             return "error_type"
-
-        if expected_param_defs is not None:
-            is_overload_sim = isinstance(expected_param_defs, list) and len(expected_param_defs) > 0 and isinstance(
-                expected_param_defs[0], list)
-
-            if is_overload_sim:
-                match_found = False
-                matched_return_type = None
-                for signature in expected_param_defs:
-                    if len(arg_types) == len(signature):
-                        compatible = True
-                        for i, (arg_t, param_t) in enumerate(zip(arg_types, signature)):
-                            if not type_compatible(param_t, arg_t, assignment_context=True,
-                                                   node_for_value=node.args[i]):
-                                compatible = False
-                                break
-                        if compatible:
-                            match_found = True
-                            matched_return_type = func_symbol.return_type if func_symbol else "error_type"
-                            break
-                if not match_found:
-                    func_name_err = func_symbol.name if func_symbol else "overloaded function"
-                    arg_type_str = ', '.join(map(str, arg_types))
-                    self.error(f"No matching overload for '{func_name_err}' with argument types ({arg_type_str})", node)
-                    expected_return_type = "error_type"
-                elif matched_return_type:
-                    expected_return_type = matched_return_type
-
-            else:  # Standard function call
-                param_symbols = expected_param_defs if isinstance(expected_param_defs, list) and all(
-                    isinstance(p, Symbol) for p in expected_param_defs) else []
-                if len(arg_types) != len(param_symbols):
-                    func_name_err = func_symbol.name if func_symbol else "function"
-                    self.error(
-                        f"Function '{func_name_err}' expects {len(param_symbols)} argument(s), but got {len(arg_types)}",
-                        node)
-                    return "error_type"
-                else:
-                    for i, (arg_t, param_sym) in enumerate(zip(arg_types, param_symbols)):
-                        if not type_compatible(param_sym.type, arg_t, assignment_context=True,
-                                               node_for_value=node.args[i]):
-                            func_name_err = func_symbol.name if func_symbol else "function"
-                            self.error(
-                                f"Argument {i + 1} type mismatch for '{func_name_err}': Expected '{param_sym.type}' (or compatible), but got '{arg_t}'",
-                                node.args[i])
-                            expected_return_type = "error_type"
-
         return expected_return_type
 
     def visit_CharLiteral(self, node):
