@@ -16,6 +16,14 @@ try:
     )
 except ImportError as e:
     print(f"严重错误：无法从 compiler_ast.py 导入 AST 节点定义。\n{e}", file=sys.stderr)
+    # 为消除警告而添加的虚拟定义（在此代码中非必需）
+    ASTNode, Program, FunctionDefinition, Parameter, CompoundStatement = (None,) * 5
+    DeclarationStatement, AssignmentStatement, ExpressionStatement = (None,) * 3
+    IfStatement, WhileStatement, ForStatement, DoWhileStatement = (None,) * 4
+    BreakStatement, ContinueStatement, ReturnStatement, Identifier = (None,) * 4
+    IntegerLiteral, FloatLiteral, StringLiteral, CharLiteral = (None,) * 4
+    BinaryOp, UnaryOp, CallExpression, ArraySubscript, MemberAccess = (None,) * 5
+    CastExpression = None
     sys.exit(1)
 
 # --- Lexer and Parser ---
@@ -26,8 +34,10 @@ try:
     # 尝试导入 preprocess 以便在主块中使用
     from preprocess import BasicPreprocessor
 except ImportError as e:
-    print(f"警告：无法导入 Lexer, Parser, 或 BasicPreprocessor。独立执行可能失败。\n{e}",
-          file=sys.stderr)
+    print(f"警告：无法导入 Lexer, Parser, 或 BasicPreprocessor。独立执行可能失败。\n{e}", file=sys.stderr)
+    LexerError, Lexer = None, None
+    ParseError, Parser = None, None
+    BasicPreprocessor = None
 
 # --- 日志配置 ---
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -464,7 +474,7 @@ class SemanticAnalyzer:
             is_lvalue_ok = isinstance(node.left, (Identifier, ArraySubscript, MemberAccess)) or \
                            (isinstance(node.left, UnaryOp) and node.left.op == '*')
             if not is_lvalue_ok:
-                self.error(f"Left operand of '{op}' must be an lvalue", node.left);
+                self.error(f"Left operand of '{op}' must be an lvalue", node.left)
                 return "error_type"
             # 检查左值是否为常量
             if left_type.startswith('const '):
@@ -473,7 +483,7 @@ class SemanticAnalyzer:
 
             # <<< 使用更新后的 type_compatible 检查类型兼容性 >>>
             if not type_compatible(left_type, right_type, assignment_context=True, node_for_value=node.right):
-                self.error(f"Type mismatch for operator '{op}': Cannot assign '{right_type}' to '{left_type}'", node);
+                self.error(f"Type mismatch for operator '{op}': Cannot assign '{right_type}' to '{left_type}'", node)
                 return "error_type"
 
             # 对复合赋值操作符进行额外检查 (+=, -=, etc.)
@@ -484,19 +494,19 @@ class SemanticAnalyzer:
                 if is_numeric(left_type) and is_numeric(right_type):
                     # 模运算需要整型
                     if base_op == '%' and (strip_const(left_type) == 'float' or strip_const(right_type) == 'float'):
-                        self.error(f"Operator '{op}' requires integral operands for modulo", node);
+                        self.error(f"Operator '{op}' requires integral operands for modulo", node)
                         return "error_type"
                     # 位运算需要整型
                     if base_op in ['&=', '|=', '^=', '<<=', '>>='] and \
                             (strip_const(left_type) == 'float' or strip_const(right_type) == 'float'):
-                        self.error(f"Operator '{op}' requires integral operands for bitwise operation", node);
+                        self.error(f"Operator '{op}' requires integral operands for bitwise operation", node)
                         return "error_type"
                     valid_compound = True
                 # 检查指针算术 (pointer += integer, pointer -= integer)
                 elif base_op in ['+', '-'] and get_pointer_base_type(left_type) is not None and strip_const(
                         right_type) == 'int':
                     if get_pointer_base_type(left_type) == 'void':
-                        self.error(f"Cannot perform pointer arithmetic with '{op}' on 'void*'", node.left);
+                        self.error(f"Cannot perform pointer arithmetic with '{op}' on 'void*'", node.left)
                         return "error_type"
                     valid_compound = True
                 # 检查字符串连接 +=
@@ -511,7 +521,7 @@ class SemanticAnalyzer:
                     # 如果 type_compatible 允许，但操作对这些类型无效（例如 float %= float）
                     self.error(
                         f"Invalid operand types ('{left_type}', '{right_type}') combination for compound assignment operator '{op}' logic",
-                        node);
+                        node)
                     return "error_type"
 
             # 赋值操作的结果类型是左值的类型
@@ -531,56 +541,59 @@ class SemanticAnalyzer:
                     # 流插入的结果是流本身
                     return 'std::ostream'
                 else:
-                    self.error(f"Cannot apply '<<' to 'std::ostream' and operand of type '{right_type}'", node);
+                    self.error(f"Cannot apply '<<' to 'std::ostream' and operand of type '{right_type}'", node)
                     return "error_type"
             else:  # 处理位左移
-                l_integral = strip_const(left_type) != 'float' and is_numeric(left_type);
-                r_integral = strip_const(right_type) != 'float' and is_numeric(right_type);
+                l_integral = strip_const(left_type) != 'float' and is_numeric(left_type)
+                r_integral = strip_const(right_type) != 'float' and is_numeric(right_type)
                 if not l_integral or not r_integral:
                     self.error(
                         f"Operands for bitwise shift '<<' must be integral, got '{left_type}' and '{right_type}'",
-                        node);
+                        node)
                     return "error_type"
                 # 结果类型通常是提升后的 int，简化为 'int'
                 return 'int'
 
         # 算术操作符 (+, -, *, /, %)
         elif op in ['+', '-', '*', '/', '%']:
-            l_ptr_base = get_pointer_base_type(left_type);
+            l_ptr_base = get_pointer_base_type(left_type)
             r_ptr_base = get_pointer_base_type(right_type)
-            l_num = is_numeric(left_type);
+            l_num = is_numeric(left_type)
             r_num = is_numeric(right_type)
-            l_str = left_type == 'string';
+            l_str = left_type == 'string'
             r_str = right_type == 'string'
 
             # 指针算术: ptr + int, int + ptr, ptr - int
             if op == '+' and l_ptr_base and r_num and strip_const(right_type) == 'int':
-                if l_ptr_base == 'void': self.error("Cannot perform arithmetic on 'void*'",
-                                                    node.left); return "error_type"
+                if l_ptr_base == 'void':
+                    self.error("Cannot perform arithmetic on 'void*'", node.left)
+                    return "error_type"
                 return left_type  # 结果是指针类型
             if op == '+' and l_num and strip_const(left_type) == 'int' and r_ptr_base:
-                if r_ptr_base == 'void': self.error("Cannot perform arithmetic on 'void*'",
-                                                    node.right); return "error_type"
+                if r_ptr_base == 'void':
+                    self.error("Cannot perform arithmetic on 'void*'", node.right)
+                    return "error_type"
                 return right_type  # 结果是指针类型
             if op == '-' and l_ptr_base and r_num and strip_const(right_type) == 'int':
-                if l_ptr_base == 'void': self.error("Cannot perform arithmetic on 'void*'",
-                                                    node.left); return "error_type"
+                if l_ptr_base == 'void':
+                    self.error("Cannot perform arithmetic on 'void*'", node.left)
+                    return "error_type"
                 return left_type  # 结果是指针类型
 
             # 指针减法: ptr - ptr
             elif op == '-' and l_ptr_base and r_ptr_base:
                 # 需要指向兼容类型的指针（暂时忽略 const）
-                t_base_nc = strip_const(l_ptr_base);
+                t_base_nc = strip_const(l_ptr_base)
                 v_base_nc = strip_const(r_ptr_base)
                 if t_base_nc == v_base_nc and t_base_nc != 'void':
                     return 'int'  # 结果通常是 ptrdiff_t，简化为 'int'
                 else:
                     # 检查是否涉及 void*，这通常不允许
                     if t_base_nc == 'void' or v_base_nc == 'void':
-                        self.error(f"Cannot subtract 'void*' pointers", node);
+                        self.error("Cannot subtract 'void*' pointers", node)
                     else:
                         self.error(f"Cannot subtract pointers of incompatible types: '{left_type}' and '{right_type}'",
-                                   node);
+                                   node)
                     return "error_type"
 
             # 字符串连接: string + string, string + char*, string + char 等
@@ -592,16 +605,16 @@ class SemanticAnalyzer:
                 # (可选) 允许 string + int (如果你的语言支持)
                 # elif other_type == 'int': return 'string'
                 else:
-                    self.error(f"Cannot concatenate 'string' with type '{other_type}' using '+'", node);
+                    self.error(f"Cannot concatenate 'string' with type '{other_type}' using '+'", node)
                     return "error_type"
 
             # 数值算术
             elif l_num and r_num:
                 if op == '%':  # 模运算需要整型
-                    l_integral = strip_const(left_type) != 'float';
-                    r_integral = strip_const(right_type) != 'float';
+                    l_integral = strip_const(left_type) != 'float'
+                    r_integral = strip_const(right_type) != 'float'
                     if not l_integral or not r_integral:
-                        self.error("Operands for modulo '%' must be integral", node);
+                        self.error("Operands for modulo '%' must be integral", node)
                         return "error_type"
                     return 'int'  # % 的结果是整型
                 # 确定结果类型（如果任一操作数是 float，则结果是 float）
@@ -611,14 +624,14 @@ class SemanticAnalyzer:
                     return 'int'  # 如果两个操作数都是整型，则结果是 int
             else:
                 # 算术运算符的操作数无效
-                self.error(f"Invalid operand types ('{left_type}', '{right_type}') for operator '{op}'", node);
+                self.error(f"Invalid operand types ('{left_type}', '{right_type}') for operator '{op}'", node)
                 return "error_type"
 
         # 关系和相等操作符 (==, !=, <, >, <=, >=)
         elif op in ['==', '!=', '<', '>', '<=', '>=']:
-            l_ptr_base = get_pointer_base_type(left_type);
+            l_ptr_base = get_pointer_base_type(left_type)
             r_ptr_base = get_pointer_base_type(right_type)
-            l_num = is_numeric(left_type);
+            l_num = is_numeric(left_type)
             r_num = is_numeric(right_type)
             # 检查是否与 NULL（整型字面量 0）比较
             is_left_null = l_num and isinstance(node.left, IntegerLiteral) and node.left.value == 0
@@ -630,7 +643,7 @@ class SemanticAnalyzer:
                 can_compare = True
             # 比较两个兼容类型的指针（允许 void*）
             elif l_ptr_base and r_ptr_base:
-                t_base_nc = strip_const(l_ptr_base);
+                t_base_nc = strip_const(l_ptr_base)
                 v_base_nc = strip_const(r_ptr_base)
                 # 允许比较相同基础类型或涉及 void* 的指针
                 if t_base_nc == v_base_nc or t_base_nc == 'void' or v_base_nc == 'void':
@@ -644,7 +657,7 @@ class SemanticAnalyzer:
 
             if not can_compare:
                 self.error(f"Cannot compare operands of types '{left_type}' and '{right_type}' using operator '{op}'",
-                           node);
+                           node)
                 return "error_type"
             # 比较的结果是布尔值，映射到 'int'
             return 'int'
@@ -657,26 +670,26 @@ class SemanticAnalyzer:
             if not l_scalar or not r_scalar:
                 self.error(
                     f"Operands for logical operator '{op}' must be scalar (numeric or pointer), got '{left_type}' and '{right_type}'",
-                    node);
+                    node)
                 return "error_type"
             # 逻辑运算的结果是布尔值，映射到 'int'
             return 'int'
 
         # 位操作符 (&, |, ^, >>) (<< 已在上面处理)
         elif op in ['&', '|', '^', '>>']:
-            l_integral = strip_const(left_type) != 'float' and is_numeric(left_type);
-            r_integral = strip_const(right_type) != 'float' and is_numeric(right_type);
+            l_integral = strip_const(left_type) != 'float' and is_numeric(left_type)
+            r_integral = strip_const(right_type) != 'float' and is_numeric(right_type)
             if not l_integral or not r_integral:
                 self.error(
                     f"Operands for bitwise operator '{op}' must be integral, got '{left_type}' and '{right_type}'",
-                    node);
+                    node)
                 return "error_type"
             # 结果类型通常是提升后的 int，简化为 'int'
             return 'int'
 
         else:
             # 如果解析器只产生已知的操作符，则不应到达此处
-            self.error(f"Unsupported or unknown binary operator '{op}' encountered in semantic analysis", node);
+            self.error(f"Unsupported or unknown binary operator '{op}' encountered in semantic analysis", node)
             return "error_type"
 
     def visit_BreakStatement(self, node):
@@ -751,10 +764,12 @@ class SemanticAnalyzer:
         func_expr_node = node.function
         called_expr_type = self.visit(func_expr_node)
 
-        if called_expr_type == "error_type": return "error_type"
+        if called_expr_type == "error_type":
+            return "error_type"
 
         arg_types = [self.visit(arg) for arg in node.args]
-        if "error_type" in arg_types: return "error_type"
+        if "error_type" in arg_types:
+            return "error_type"
 
         func_symbol = None
         expected_param_defs = None
@@ -765,7 +780,7 @@ class SemanticAnalyzer:
             try:
                 func_symbol = self.symbol_table.lookup(func_name, func_expr_node)
                 if func_symbol.kind != 'function':
-                    self.error(f"'{func_name}' is a {func_symbol.kind}, not a function", func_expr_node);
+                    self.error(f"'{func_name}' is a {func_symbol.kind}, not a function", func_expr_node)
                     return "error_type"
                 expected_param_defs = func_symbol.params
                 expected_return_type = func_symbol.return_type
@@ -783,14 +798,14 @@ class SemanticAnalyzer:
                 else:
                     self.error(
                         f"Could not determine return type from function pointer type string: '{called_expr_type}'",
-                        node);
+                        node)
                     return "error_type"
             except Exception as e:
-                self.error(f"Error parsing function pointer type string '{called_expr_type}': {e}", node);
+                self.error(f"Error parsing function pointer type string '{called_expr_type}': {e}", node)
                 return "error_type"
 
         else:
-            self.error(f"Expression of type '{called_expr_type}' is not callable", func_expr_node);
+            self.error(f"Expression of type '{called_expr_type}' is not callable", func_expr_node)
             return "error_type"
 
         if expected_param_defs is not None:
@@ -806,10 +821,10 @@ class SemanticAnalyzer:
                         for i, (arg_t, param_t) in enumerate(zip(arg_types, signature)):
                             if not type_compatible(param_t, arg_t, assignment_context=True,
                                                    node_for_value=node.args[i]):
-                                compatible = False;
+                                compatible = False
                                 break
                         if compatible:
-                            match_found = True;
+                            match_found = True
                             matched_return_type = func_symbol.return_type if func_symbol else "error_type"
                             break
                 if not match_found:
@@ -904,7 +919,8 @@ class SemanticAnalyzer:
         var_symbol = Symbol(var_name, var_type, kind='variable', node=node)
         try:
             self.symbol_table.declare(var_symbol)
-            if node.name: setattr(node.name, 'symbol', var_symbol)
+            if node.name:
+                setattr(node.name, 'symbol', var_symbol)
         except SemanticError:
             pass
         return None
@@ -932,13 +948,15 @@ class SemanticAnalyzer:
         """分析 for 循环，管理作用域。"""
         self.loop_depth += 1
         self.symbol_table.enter_scope("for_loop")
-        if node.init: self.visit(node.init)
+        if node.init:
+            self.visit(node.init)
         if node.condition:
             cond_type = self.visit(node.condition)
             is_scalar = is_numeric(cond_type) or get_pointer_base_type(cond_type) is not None
             if cond_type != "error_type" and not is_scalar:
                 self.error(f"For loop condition must be scalar type, got '{cond_type}'", node.condition)
-        if node.update: self.visit(node.update)
+        if node.update:
+            self.visit(node.update)
         self.visit(node.body)
         self.symbol_table.exit_scope()
         self.loop_depth -= 1
@@ -1062,25 +1080,27 @@ class SemanticAnalyzer:
         """分析成员访问 obj.member 或 ptr->member。"""
         object_or_ptr_type = self.visit(node.object_or_pointer_expression)
         member_name = node.member_identifier.name
-        if object_or_ptr_type == "error_type": return "error_type"
+        if object_or_ptr_type == "error_type":
+            return "error_type"
         logging.warning(
             f"Member access analysis requires struct/class definitions. Skipping check for '.{member_name}' or '->{member_name}'.")
         if node.is_pointer_access:
             base_struct_type = get_pointer_base_type(object_or_ptr_type)
             if base_struct_type is None:
                 self.error(f"Operator '->' requires a pointer operand, got '{object_or_ptr_type}'",
-                           node.object_or_pointer_expression);
+                           node.object_or_pointer_expression)
                 return "error_type"
         else:
             if get_pointer_base_type(object_or_ptr_type) is not None:
                 self.error(f"Operator '.' requires a non-pointer operand, got '{object_or_ptr_type}'",
-                           node.object_or_pointer_expression);
+                           node.object_or_pointer_expression)
                 return "error_type"
         return "unknown_member_type"  # Or "error_type"
 
     def visit_Parameter(self, node):
         """访问参数节点（主要由 FunctionDefinition 处理）。"""
-        if node.name: self.visit(node.name)
+        if node.name:
+            self.visit(node.name)
         return node.param_type
 
     def visit_Program(self, node):
@@ -1096,13 +1116,14 @@ class SemanticAnalyzer:
         """分析 return 语句，根据当前函数检查类型。"""
         current_func = self.symbol_table.get_current_function()
         if not current_func:
-            self.error("Return statement outside of a function", node);
+            self.error("Return statement outside of a function", node)
             return None
         expected_type = current_func.return_type
         actual_type = 'void'
         if node.value:
             actual_type = self.visit(node.value)
-            if actual_type == 'error_type': return None
+            if actual_type == 'error_type':
+                return None
         if expected_type == 'void':
             if actual_type != 'void':
                 self.error(f"Cannot return value of type '{actual_type}' from void function '{current_func.name}'",
@@ -1122,7 +1143,7 @@ class SemanticAnalyzer:
 
     def visit_UnaryOp(self, node):
         """分析一元操作。"""
-        op = node.op;
+        op = node.op
         operand_node = node.operand
         if op == 'sizeof':
             if isinstance(operand_node, ASTNode):
@@ -1134,49 +1155,61 @@ class SemanticAnalyzer:
             return 'int'
 
         operand_type = self.visit(operand_node)
-        if operand_type == "error_type": return "error_type"
+        if operand_type == "error_type":
+            return "error_type"
 
         if op in ['+', '-']:
-            if not is_numeric(operand_type): self.error(f"Unary '{op}' requires numeric operand, got '{operand_type}'",
-                                                        node); return "error_type"
+            if not is_numeric(operand_type):
+                self.error(f"Unary '{op}' requires numeric operand, got '{operand_type}'", node)
+                return "error_type"
             return operand_type
         elif op == '!':
             is_scalar = is_numeric(operand_type) or get_pointer_base_type(operand_type) is not None
-            if not is_scalar: self.error(f"Operator '!' requires scalar operand, got '{operand_type}'",
-                                         node); return "error_type"
+            if not is_scalar:
+                self.error(f"Operator '!' requires scalar operand, got '{operand_type}'", node)
+                return "error_type"
             return 'int'
         elif op == '~':
             is_integral = strip_const(operand_type) != 'float' and is_numeric(operand_type)
-            if not is_integral: self.error(f"Operator '~' requires integral operand, got '{operand_type}'",
-                                           node); return "error_type"
+            if not is_integral:
+                self.error(f"Operator '~' requires integral operand, got '{operand_type}'", node)
+                return "error_type"
             return 'int'
         elif op == '&':
             is_lvalue_ok = isinstance(operand_node, (Identifier, ArraySubscript, MemberAccess)) or (
                     isinstance(operand_node, UnaryOp) and operand_node.op == '*')
-            if not is_lvalue_ok: self.error("Cannot take address of non-lvalue with '&'",
-                                            operand_node); return "error_type"
+            if not is_lvalue_ok:
+                self.error("Cannot take address of non-lvalue with '&'", operand_node)
+                return "error_type"
             return make_pointer_type(operand_type)
         elif op == '*':
             base_type = get_pointer_base_type(operand_type)
-            if base_type is None: self.error(f"Cannot dereference non-pointer type '{operand_type}'",
-                                             node); return "error_type"
-            if base_type == 'void': self.error("Cannot dereference 'void*'", node); return "error_type"
+            if base_type is None:
+                self.error(f"Cannot dereference non-pointer type '{operand_type}'", node)
+                return "error_type"
+            if base_type == 'void':
+                self.error("Cannot dereference 'void*'", node)
+                return "error_type"
             return base_type
         elif op in ['p++', 'p--', '++p', '--p']:
             is_lvalue_ok = isinstance(operand_node, (Identifier, ArraySubscript, MemberAccess)) or (
                     isinstance(operand_node, UnaryOp) and operand_node.op == '*')
-            if not is_lvalue_ok: self.error(f"Operand of '{op}' must be a modifiable lvalue",
-                                            operand_node); return "error_type"
-            if operand_type.startswith('const '): self.error(f"Cannot modify constant lvalue with '{op}'",
-                                                             operand_node); return "error_type"
+            if not is_lvalue_ok:
+                self.error(f"Operand of '{op}' must be a modifiable lvalue", operand_node)
+                return "error_type"
+            if operand_type.startswith('const '):
+                self.error(f"Cannot modify constant lvalue with '{op}'", operand_node)
+                return "error_type"
             is_scalar = is_numeric(operand_type) or get_pointer_base_type(operand_type) is not None
-            if not is_scalar: self.error(f"Operator '{op}' requires scalar operand, got '{operand_type}'",
-                                         operand_node); return "error_type"
-            if get_pointer_base_type(operand_type) == 'void': self.error(f"Cannot apply '{op}' to 'void*'",
-                                                                         operand_node); return "error_type"
+            if not is_scalar:
+                self.error(f"Operator '{op}' requires scalar operand, got '{operand_type}'", operand_node)
+                return "error_type"
+            if get_pointer_base_type(operand_type) == 'void':
+                self.error(f"Cannot apply '{op}' to 'void*'", operand_node)
+                return "error_type"
             return operand_type
         else:
-            self.error(f"Unsupported unary operator '{op}'", node);
+            self.error(f"Unsupported unary operator '{op}'", node)
             return "error_type"
 
     def visit_WhileStatement(self, node):
@@ -1213,7 +1246,8 @@ class SemanticAnalyzer:
 def print_annotated_ast(node, indent="", prefix="", is_last=True):
     """递归打印 AST，如果存在，则包括 'semantic_type' 注释。"""
     # (代码与上一个回复中的 print_annotated_ast 相同，此处省略以简洁)
-    if node is None: return
+    if node is None:
+        return
     connector = "└── " if is_last else "├── "
     print(f"{indent}{connector}{prefix}", end="")
     line_info = f" (L{node.line})" if hasattr(node, 'line') and node.line is not None else ""
@@ -1226,28 +1260,29 @@ def print_annotated_ast(node, indent="", prefix="", is_last=True):
                            CallExpression, ArraySubscript, MemberAccess, CastExpression)):
         semantic_type_info = " [type: <unannotated>]"
     if isinstance(node, Identifier):
-        details = f" name='{node.name}'";  # ... (rest of the node details logic) ...
+        details = f" name='{node.name}'"
     elif isinstance(node, IntegerLiteral):
-        details = f" value={node.value}";  # ...
+        details = f" value={node.value}"
     elif isinstance(node, FloatLiteral):
-        details = f" value={node.value}";  # ...
+        details = f" value={node.value}"
     elif isinstance(node, (StringLiteral, CharLiteral)):
-        details = f" value={repr(node.value)}";  # ...
+        details = f" value={repr(node.value)}"
     elif isinstance(node, BinaryOp):
-        details = f" op='{node.op}'";  # ...
+        details = f" op='{node.op}'"
     elif isinstance(node, UnaryOp):
-        details = f" op='{node.op}'";  # ... (handle sizeof type) ...
+        details = f" op='{node.op}'"
     elif isinstance(node, CastExpression):
-        details = f" target_type='{node.target_type}'";  # ...
+        details = f" target_type='{node.target_type}'"
     elif isinstance(node, DeclarationStatement):
-        details = f" decl_type='{node.decl_type}' name='{node.name.name}'";  # ... (handle prototype) ...
+        details = f" decl_type='{node.decl_type}' name='{node.name.name}'"
     elif isinstance(node, FunctionDefinition):
-        details = f" name='{node.name.name}' return_type='{node.return_type}'";  # ...
+        details = f" name='{node.name.name}' return_type='{node.return_type}'"
     elif isinstance(node, Parameter):
-        details = f" type='{node.param_type}' name='{node.name.name if node.name else '<unnamed>'}'";  # ...
+        details = f" type='{node.param_type}' name='{node.name.name if node.name else '<unnamed>'}'"
     elif isinstance(node, MemberAccess):
-        op = '->' if node.is_pointer_access else '.';
-        details = f" member='{node.member_identifier.name}' op='{op}'";  # ...
+        op = '->' if node.is_pointer_access else '.'
+        details = f" member='{node.member_identifier.name}' op='{op}'"
+
     print(f"{node_name}{line_info}{details}{semantic_type_info}")
     child_indent = indent + ("    " if is_last else "│   ")
     children_to_print = []
@@ -1263,53 +1298,52 @@ def print_annotated_ast(node, indent="", prefix="", is_last=True):
     child_attrs = child_attrs_map.get(type(node), [])
     if hasattr(node, 'is_prototype') and node.is_prototype and hasattr(node, 'prototype_params'):
         if 'params' not in child_attrs: child_attrs.append('prototype_params')
-    for attr_name in child_attrs:  # ... (rest of the children printing logic) ...
+    for attr_name in child_attrs:
         child = getattr(node, attr_name, None)
         if isinstance(node, UnaryOp) and node.op == 'sizeof' and isinstance(node.operand,
-                                                                            str) and attr_name == 'operand': continue
-        if child is not None:  # ... (handle list vs single node) ...
+                                                                            str) and attr_name == 'operand':
+            continue
+        if child is not None:
             if isinstance(child, list):
                 valid_items = [item for item in child if item is not None]
-                if valid_items: children_to_print.append((attr_name, valid_items, True))
+                if valid_items:
+                    children_to_print.append((attr_name, valid_items, True))
             elif isinstance(child, ASTNode):
                 children_to_print.append((attr_name, child, False))
     num_children = len(children_to_print)
-    for i, (attr_name, child_or_list, is_list) in enumerate(children_to_print):  # ... (recursive calls) ...
+    for i, (attr_name, child_or_list, is_list) in enumerate(children_to_print):
         is_last_child = (i == num_children - 1)
         current_prefix = f"{attr_name}: " if attr_name else ""
-        if is_list:  # ... (print list header and items recursively) ...
-            list_connector = "└── " if is_last_child else "├── ";
+        if is_list:
+            list_connector = "└── " if is_last_child else "├── "
             print(f"{child_indent}{list_connector}{current_prefix}[{len(child_or_list)} item(s)]")
             list_item_indent = child_indent + ("    " if is_last_child else "│   ")
-            num_items = len(child_or_list);
-            for j, item in enumerate(child_or_list): print_annotated_ast(item, indent=list_item_indent,
-                                                                         prefix=f"[{j}]: ",
-                                                                         is_last=(j == num_items - 1))
+            num_items = len(child_or_list)
+            for j, item in enumerate(child_or_list):
+                print_annotated_ast(item, indent=list_item_indent,
+                                    prefix=f"[{j}]: ",
+                                    is_last=(j == num_items - 1))
         elif isinstance(child_or_list, ASTNode):
             print_annotated_ast(child_or_list, indent=child_indent, prefix=current_prefix, is_last=is_last_child)
         else:
-            leaf_connector = "└── " if is_last_child else "├── ";
-            print(
-                f"{child_indent}{leaf_connector}{current_prefix}{repr(child_or_list)}")
+            leaf_connector = "└── " if is_last_child else "├── "
+            print(f"{child_indent}{leaf_connector}{current_prefix}{repr(child_or_list)}")
 
 
-# === 主执行块 (重构后版本) ===
 if __name__ == "__main__":
-    # --- 参数检查 ---
     if len(sys.argv) != 2:
         print(f"用法: python {sys.argv[0]} <input_file.cpp>", file=sys.stderr)
         sys.exit(1)
 
     input_file_path = sys.argv[1]
 
-    # --- 初始化变量 ---
     raw_code = None
     processed_code = None
-    tokens = []  # 初始化为空列表
+    tokens = []
     ast = None
     line_map = {}
     had_errors = False
-    semantic_success = False  # 初始化语义分析成功标志
+    semantic_success = False
 
     print(f"--- 开始编译流程: {input_file_path} ---")
 
@@ -1330,30 +1364,27 @@ if __name__ == "__main__":
     if not had_errors:
         print("\n--- Stage 2: Preprocessing ---")
         try:
-            # 尝试导入并运行预处理器
-            preprocessor = BasicPreprocessor()  # 假设 BasicPreprocessor 已导入或定义
+            preprocessor = BasicPreprocessor()
             processed_code, line_map = preprocessor.process(raw_code)
             print("预处理完成。")
-        except NameError:  # 如果 BasicPreprocessor 未定义
+        except NameError:
             print("警告: 预处理器 BasicPreprocessor 未找到或导入失败。跳过此阶段。")
             processed_code = raw_code
             num_lines = raw_code.count('\n') + 1
             line_map = {i: i for i in range(1, num_lines + 1)}
         except Exception as e:
             print(f"预处理期间出错: {e}。使用原始代码。", file=sys.stderr)
-            logging.exception("预处理器崩溃")  # 记录详细错误
-            processed_code = raw_code  # 回退到原始代码
+            logging.exception("预处理器崩溃")
+            processed_code = raw_code
             num_lines = raw_code.count('\n') + 1
             line_map = {i: i for i in range(1, num_lines + 1)}
-            # 根据策略决定是否将预处理错误视为致命错误
-            # had_errors = True # 如果希望预处理失败则停止
 
     # --- 阶段 3: 词法分析 ---
     if not had_errors and processed_code is not None:
         print("\n--- Stage 3: Lexical Analysis ---")
         try:
-            lexer = Lexer(processed_code, line_map)  # 假设 Lexer 已导入或定义
-            tokens = list(lexer.tokenize())  # 获取 token 列表
+            lexer = Lexer(processed_code, line_map)
+            tokens = list(lexer.tokenize())
             print(f"词法分析完成。生成了 {len(tokens)} 个 Tokens。")
         except NameError:
             print("错误: 词法分析器 Lexer 未找到或导入失败。", file=sys.stderr)
@@ -1369,29 +1400,26 @@ if __name__ == "__main__":
     # --- 阶段 4: 语法分析 (解析) ---
     if not had_errors:
         print("\n--- Stage 4: Parsing ---")
-        # 检查 Token 列表是否有效为空
         is_effectively_empty = not tokens or (len(tokens) == 1 and tokens[0].type == 'EOF')
         if is_effectively_empty:
             print("输入在词法分析后有效为空。创建空的 Program AST。")
             eof_token = tokens[0] if tokens else None
             prog_line = eof_token.original_line if eof_token else 1
             prog_col = eof_token.column if eof_token else 1
-            ast = Program([], line=prog_line, column=prog_col)  # 创建空程序节点
+            ast = Program([], line=prog_line, column=prog_col)
         else:
             try:
-                parser = Parser(tokens)  # 假设 Parser 已导入或定义
+                parser = Parser(tokens)
                 ast = parser.parse_program()
                 print("语法分析完成。")
                 if ast is None:
-                    # 解析器对于非空输入返回 None 是一个内部错误
                     print("错误: 解析器未能为非空输入生成 AST。", file=sys.stderr)
                     had_errors = True
             except NameError:
                 print("错误: 解析器 Parser 未找到或导入失败。", file=sys.stderr)
                 had_errors = True
             except ParseError as e:
-                # 解析器内部应该已经打印了详细错误
-                print(f"语法分析失败。", file=sys.stderr)
+                print("语法分析失败。", file=sys.stderr)
                 had_errors = True
             except Exception as e:
                 print(f"意外的语法分析错误: {e}", file=sys.stderr)
@@ -1400,33 +1428,27 @@ if __name__ == "__main__":
 
     # --- 阶段 5: 语义分析 ---
     if not had_errors and ast is not None:
-        print("\n--- Stage 5: Semantic Analysis ---")
+        # print("\n--- Stage 5: Semantic Analysis ---") # 已在 analyze 方法内部打印
         try:
-            analyzer = SemanticAnalyzer()  # 创建分析器实例
-            semantic_success = analyzer.analyze(ast)  # 执行分析，内部会打印符号表
-
-            # 仅在语义分析本身成功时打印带注释的 AST
+            analyzer = SemanticAnalyzer()
+            semantic_success = analyzer.analyze(ast)  # analyze 方法会打印其开始和结束消息
             if semantic_success:
                 print("\n--- Final Annotated AST ---")
-                print_annotated_ast(ast)  # 假设 print_annotated_ast 已定义
+                print_annotated_ast(ast)
                 print("---------------------------")
             else:
-                # 如果 analyze() 返回 False，说明存在语义错误
+                # analyzer.analyze 已经打印了错误数量
                 had_errors = True
-
         except Exception as e:
             print(f"意外的语义分析错误: {e}", file=sys.stderr)
             logging.exception("语义分析器崩溃")
             had_errors = True
-            semantic_success = False
+            # semantic_success = False # 已默认为 False 或被设为 False
 
-    # --- 最终总结 ---
     print("\n--- Compilation Summary ---")
     if had_errors:
         print("编译因错误而失败。")
         sys.exit(1)
     else:
-        # 如果到达这里，意味着所有阶段都未将 had_errors 设为 True
-        # 并且如果进行了语义分析，semantic_success 也为 True (或未进行分析)
         print("编译流程成功完成。")
         sys.exit(0)
