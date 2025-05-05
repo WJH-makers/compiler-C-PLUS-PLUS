@@ -3,7 +3,8 @@ import logging
 import re
 import sys
 
-# Setup basic logging
+from preprocess import BasicPreprocessor
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
@@ -33,7 +34,6 @@ class Lexer:
         self.column = 1
         self.tokens = []
         self.line_mapping = line_mapping
-        # <<< MODIFIED KEYWORDS SET >>>
         self.keywords = {
             'auto', 'break', 'case', 'char', 'const', 'continue', 'default', 'do',
             'double', 'else', 'enum', 'extern', 'float', 'for', 'goto', 'if',
@@ -51,7 +51,6 @@ class Lexer:
             'wchar_t', 'xor', 'xor_eq',
         }
         self.token_specs = [
-            # --- Regex patterns remain the same ---
             ('COMMENT_MULTI', r'/\*.*?\*/'),
             ('COMMENT_SINGLE', r'//.*'),
             ('NEWLINE', r'\n'),
@@ -70,52 +69,45 @@ class Lexer:
              r'(([0-9]+(\'[0-9]+)*\.[0-9]*(\'[0-9]+)*|\.[0-9]+(\'[0-9]+)*)([eE][+-]?[0-9]+(\'[0-9]+)*)?|[0-9]+(\'[0-9]+)*[eE][+-]?[0-9]+(\'[0-9]+)*)[fFlL]?'),
             ('OCT_INTEGER', r'0[0-7]+(\'[0-7]+)*[uUlL]*'),
             ('DEC_INTEGER', r'[0-9]+(\'[0-9]+)*[uUlL]*'),
-            ('IDENTIFIER', r'[a-zA-Z_][a-zA-Z0-9_]*'),  # Matches keywords too initially
+            ('IDENTIFIER', r'[a-zA-Z_][a-zA-Z0-9_]*'),
             ('MISMATCH', r'.')
         ]
         self.master_regex = re.compile('|'.join(f'(?P<{name}>{pattern})' for name, pattern in self.token_specs),
                                        re.DOTALL)
 
     def _interpret_escapes(self, s):
-        # ... (保持不变) ...
         escape_map = {'\\n': '\n', '\\t': '\t', '\\r': '\r', '\\\\': '\\', '\\\'': '\'', '\\"': '"', '\\a': '\a',
                       '\\b': '\b', '\\f': '\f', '\\v': '\v', '\\?': '?'}
-        out = "";
+        out = ""
         i = 0
         while i < len(s):
             if s[i] == '\\':
                 if i + 1 < len(s):
                     esc2 = s[i:i + 2]
                     if esc2 in escape_map:
-                        out += escape_map[esc2];
-                        i += 2;
+                        out += escape_map[esc2]
+                        i += 2
                         continue
                     elif s[i + 1] >= '0' and s[i + 1] <= '7':
                         j = i + 1
                         while j < len(s) and s[j] >= '0' and s[j] <= '7' and (j - i - 1) < 3: j += 1
-                        octal_val = int(s[i + 1:j], 8);
-                        out += chr(octal_val);
-                        i = j;
+                        octal_val = int(s[i + 1:j], 8)
+                        out += chr(octal_val)
+                        i = j
                         continue
                     elif s[i + 1] in ('x', 'X') and i + 2 < len(s) and s[i + 2] in '0123456789abcdefABCDEF':
                         j = i + 2
                         while j < len(s) and s[j] in '0123456789abcdefABCDEF': j += 1
                         if j > i + 2:  # Check if at least one hex digit was found
-                            hex_val = int(s[i + 2:j], 16);
-                            out += chr(hex_val);
-                            i = j;
+                            hex_val = int(s[i + 2:j], 16)
+                            out += chr(hex_val)
+                            i = j
                             continue
-                # If escape sequence is invalid or incomplete, treat literally? Or error?
-                # Current behavior treats invalid escapes like '\\z' literally as '\' and 'z'
-                out += s[i];
-                i += 1  # Treat backslash literally if escape is invalid
-            else:
-                out += s[i];
-                i += 1
+            out += s[i]
+            i += 1
         return out
 
     def _get_original_line(self, processed_line_num):
-        # ... (保持不变) ...
         original_line = self.line_mapping.get(processed_line_num)
         if original_line is None:
             logging.warning(f"No original line mapping for processed L{processed_line_num}.")
@@ -141,12 +133,11 @@ class Lexer:
                 lines_in_match = value.count('\n')
                 if lines_in_match > 0:
                     self.processed_line += lines_in_match
-                    # Calculate column after the last newline
                     self.column = len(value) - value.rfind('\n')
                 else:
-                    self.column += len(value)  # No newline, just advance column
+                    self.column += len(value)
                 self.position = match.end()
-                continue  # Skip to next token
+                continue
 
             # --- Determine Token Type and Value ---
             token_type = None
@@ -173,34 +164,23 @@ class Lexer:
                 token_value = match.group('content')  # Value is just the content part
             elif kind in ['HEX_INTEGER', 'OCT_INTEGER', 'DEC_INTEGER', 'BIN_INTEGER']:
                 token_type = 'INTEGER_LITERAL'
-                # Value conversion happens in AST node __init__
             elif kind == 'FLOAT_LITERAL':
                 token_type = 'FLOAT_LITERAL'
-                # Value conversion happens in AST node __init__
             elif kind == 'IDENTIFIER':
-                # <<< --- Check if it's a keyword NOW --- >>>
                 token_type = 'KEYWORD' if token_value in self.keywords else 'IDENTIFIER'
             elif kind == 'MISMATCH':
                 raise LexerError(f"Illegal character encountered: '{token_value}'", current_original_line, start_column)
             else:
-                # Should not happen if regex covers all cases + MISMATCH
                 raise LexerError(f"Unhandled token kind: {kind}", current_original_line, start_column)
 
-            # Create and append token
             self.tokens.append(Token(token_type, token_value, current_original_line, start_column))
-
-            # Update position and column
-            # Column update needs care if value contains newlines (e.g., raw strings, block comments if not skipped)
-            lines_in_value = token_value.count('\n')  # Should be 0 for most non-skipped tokens
+            lines_in_value = token_value.count('\n')
             if lines_in_value > 0:
                 self.processed_line += lines_in_value
                 self.column = len(token_value) - token_value.rfind('\n')
             else:
-                self.column += len(match.group(kind))  # Advance by raw matched length
-
+                self.column += len(match.group(kind))
             self.position = match.end()
-
-        # Add EOF token at the end
         eof_original_line = self._get_original_line(self.processed_line)
         self.tokens.append(Token("EOF", "", eof_original_line, self.column))
         return self.tokens
@@ -221,23 +201,20 @@ if __name__ == "__main__":
         logging.info(f"正在读取文件: {input_file_path}")
         with open(input_file_path, 'r', encoding='utf-8') as infile:
             raw_code = infile.read()
-        # ... (Preprocessing logic remains the same) ...
         try:
-            from preprocess import BasicPreprocessor
-
             logging.info("正在尝试运行预处理器...")
             preprocessor = BasicPreprocessor()
             processed_code, line_map = preprocessor.process(raw_code)
             logging.info("预处理完成.")
         except ImportError:
             logging.warning("警告: 找不到 preprocess.py。将对原始代码进行词法分析 (无行号映射)。")
-            processed_code = raw_code;
-            num_lines = raw_code.count('\n') + 1;
+            processed_code = raw_code
+            num_lines = raw_code.count('\n') + 1
             line_map = {i: i for i in range(1, num_lines + 1)}
         except Exception as e:
             logging.error(f"预处理时发生错误: {e}。将对原始代码进行词法分析 (无行号映射)。", exc_info=True)
-            processed_code = raw_code;
-            num_lines = raw_code.count('\n') + 1;
+            processed_code = raw_code
+            num_lines = raw_code.count('\n') + 1
             line_map = {i: i for i in range(1, num_lines + 1)}
 
         if processed_code is not None:
@@ -253,11 +230,11 @@ if __name__ == "__main__":
             sys.exit(1)
 
     except FileNotFoundError:
-        logging.error(f"错误: 文件 '{input_file_path}' 未找到");
+        logging.error(f"错误: 文件 '{input_file_path}' 未找到")
         sys.exit(1)
     except LexerError as e:
-        logging.error(e);
+        logging.error(e)
         sys.exit(1)
     except Exception as e:
-        logging.error(f"发生未预料的错误: {e}", exc_info=True);
+        logging.error(f"发生未预料的错误: {e}", exc_info=True)
         sys.exit(1)

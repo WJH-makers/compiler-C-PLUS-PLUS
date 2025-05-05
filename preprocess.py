@@ -1,7 +1,7 @@
 # coding=utf-8
-import sys
-import re
 import logging  # 使用日志记录进行调试
+import re
+import sys
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -202,8 +202,13 @@ class BasicPreprocessor:
             while next_scan_pos < len(current_line):
                 found_match = False
                 for macro in sorted_macros:
+                    if macro.is_function_like: continue
                     pattern = r'\b' + re.escape(macro.name) + r'\b'
                     match = re.match(pattern, current_line[next_scan_pos:])
+                    """
+                    re.match(pattern, current_line[next_scan_pos:]) 只会尝试匹配 pattern 是否从 current_line[next_scan_pos:] 的起始位置（也就是原始字符串 current_line 中的 next_scan_pos 这个位置）开始。
+                    它不会在 current_line[next_scan_pos:] 这个子字符串内部、从 next_scan_pos 之后（例如 next_scan_pos + 1, next_scan_pos + 2 等位置）开始进行匹配。
+                    """
                     if match:
                         logging.debug(f"Applying object macro '{macro.name}' for value '{macro.value}'")
                         temp_line += macro.value
