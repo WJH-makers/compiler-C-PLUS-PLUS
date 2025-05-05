@@ -2,30 +2,54 @@
 import logging
 import sys
 
-# 配置日志记录
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 try:
-    # 导入 AST 节点定义和词法分析器
-    # --- <<< Import CastExpression >>> ---
-    from compiler_ast import (
-        ASTNode, Program, FunctionDefinition, Parameter, CompoundStatement,
-        DeclarationStatement, AssignmentStatement, ExpressionStatement,
-        IfStatement, WhileStatement, ForStatement, DoWhileStatement,
-        BreakStatement, ContinueStatement, ReturnStatement, Identifier,
-        IntegerLiteral, FloatLiteral, StringLiteral, CharLiteral,
-        BinaryOp, UnaryOp, CallExpression, ArraySubscript, MemberAccess,
-        CastExpression  # Add CastExpression here
-    )
-    # --- <<< End Import CastExpression >>> ---
-    from lexer import LexerError, Lexer  # 假设 Lexer 在这里导入
+    from compiler_ast import *
+    from lexer import LexerError, Lexer
 except ImportError as e:
     print(f"错误：无法导入所需的模块 (compiler_ast, lexer)。请确保它们存在且路径正确。\n{e}", file=sys.stderr)
     sys.exit(1)
 
+# C++ 开头关键字
+cpp_declaration_starters = [
+    "alignas",  # 用于指定对齐要求，可以放在声明的最前面
+    "auto",  # 用于类型推导或自动存储期
+    "bool",  # 基本类型
+    "char",  # 基本类型
+    "class",  # 用户定义类型
+    "const",  # 类型限定符，可以放在类型前面
+    "consteval",  # C++20，函数或变量必须在编译期求值
+    "constexpr",  # C++11，编译期常量
+    "constinit",  # C++20，静态初始化
+    "decltype",  # C++11，类型推导
+    "double",  # 基本类型
+    "enum",  # 用户定义类型
+    "extern",  # 外部链接
+    "float",  # 基本类型
+    "int",  # 基本类型
+    "long",  # 基本类型修饰符
+    "register",  # 存储类说明符（基本废弃）
+    "restrict",  # C++11 (来自 C99)，用于指针别名分析
+    "short",  # 基本类型修饰符
+    "signed",  # 基本类型修饰符
+    "static",  # 静态存储期或内部链接
+    "static_assert",  # C++11，静态断言声明
+    "struct",  # 用户定义类型
+    "thread_local",  # C++11，线程局部存储期
+    "typedef",  # 定义类型别名
+    "union",  # 用户定义类型
+    "unsigned",  # 基本类型修饰符
+    "using",  # C++11，用于类型别名或引入声明
+    "void",  # 基本类型（常用于函数返回类型或无类型指针）
+    "volatile",  # 类型限定符
+    "wchar_t",  # 基本类型
+]
+
 
 class ParseError(Exception):
     """用于解析错误的自定义异常。"""
+
     def __init__(self, message, token):
         location = f"L{token.original_line}:C{token.column}" if token and hasattr(token,
                                                                                   'original_line') and token.original_line is not None else "UnknownLocation/EOF"
@@ -39,6 +63,7 @@ class Parser:
     语法分析器类，负责将 Token 流转换为抽象语法树 (AST)。
     使用 Precedence Climbing (优先级爬升) 方法解析表达式。
     """
+
     def __init__(self, tokens):
         self.token_iter = iter(tokens)
         self.current_token = None
@@ -51,24 +76,17 @@ class Parser:
         self.current_token = self.peek_token
         try:
             self.peek_token = next(self.token_iter)
-            # DEBUG: print(f"Advanced: current={self.current_token}, peek={self.peek_token}")
         except StopIteration:
             self.peek_token = None
 
     def _error(self, message, token=None):
         """报告解析错误并抛出异常。"""
         error_token = token or self.current_token
-        # DEBUG: print(f"Parse Error called with token: {error_token}")
         if error_token is None:
-            # If current is None, try to use the last non-None token for location? Difficult.
             raise ParseError(message + " (at end of input)", None)
-        # Ensure error uses a token that has location info if possible
         if not hasattr(error_token, 'original_line') or error_token.original_line is None:
-            # If the error token lacks location, find the last one that had it?
-            # For now, just raise with what we have.
             pass
         raise ParseError(message, error_token)
-
 
     def _check(self, token_type, value=None):
         """检查当前 Token 是否匹配指定的类型和（可选的）值。"""
@@ -76,7 +94,6 @@ class Parser:
             return False
         type_match = self.current_token.type == token_type
         value_match = (value is None or self.current_token.value == value)
-        # DEBUG: print(f"Check: Current={self.current_token}, TargetType={token_type}, TargetValue={value} -> TypeMatch={type_match}, ValueMatch={value_match}")
         return type_match and value_match
 
     def _check_peek(self, token_type, value=None):
@@ -95,53 +112,50 @@ class Parser:
 
     def _consume(self, token_type, error_msg, value=None):
         """期望当前 Token 匹配，消耗它，并返回被消耗的 Token。如果不匹配则引发 ParseError。"""
-        consumed_token = self.current_token  # Store before potential advance
+        consumed_token = self.current_token
         if not self._check(token_type, value):
             expected = f"'{value}' ({token_type})" if value else token_type
             found_type = self.current_token.type if self.current_token else "EOF"
             found_val = repr(self.current_token.value) if self.current_token else "EOF"
             self._error(f"{error_msg}. Expected {expected}, but found {found_val} ({found_type})",
                         token=self.current_token or consumed_token)
-        self._advance()  # Consume the token only if it matched
-        return consumed_token  # Return the token that was consumed
+        self._advance()
+        return consumed_token
 
-    # 运算符优先级和结合性定义
+    # 运算符优先级和结合性定义 数值越大表示优先级越高
     PRECEDENCE = {
         '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1, '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1,
-        '?': 2,  # Ternary operator (requires special handling, not fully implemented here)
+        '?': 2,
         '||': 3, '&&': 4, '|': 5, '^': 6, '&': 7,
         '==': 8, '!=': 8, '<': 9, '>': 9, '<=': 9, '>=': 9,
         '<<': 10, '>>': 10, '+': 11, '-': 11, '*': 12, '/': 12, '%': 12,
-        # Unary operators have higher precedence handled in _parse_unary_expression
-        # Postfix operators like (), [], ->, . have highest precedence handled in _parse_postfix_expression
     }
+    """
+    算术运算符 (*, /, +, -)：操作数值，进行基本的数学计算。优先级较高，因为它们通常是计算值的基础。
+    位运算符 (<<, >>, &, |, ^)：操作数据的二进制位。优先级通常低于算术运算符，因为它们是在位层面进行操作，结果再被用于更高级的计算或比较。
+    关系运算符 (<, >, <=, >=) 和相等性运算符 (==, !=)：比较数值或位运算的结果，产生布尔值（真或假）。它们的优先级低于算术和位运算符，因为比较是基于计算结果进行的。关系运算符通常比相等性运算符优先级高一点。
+    逻辑运算符 (&&, ||)：操作布尔值，进行逻辑判断。它们的优先级低于关系运算符，因为逻辑判断的对象通常是比较的结果。&& 的优先级高于 ||，这类似于算术中乘法高于加法，可以让 A && B || C && D 这样的表达式读起来像 (A && B) || (C && D)，符合逻辑上的结合习惯（“与”比“或”结合更紧）。
+    条件运算符 (? :)：根据一个布尔条件选择两个表达式中的一个。它的优先级低于逻辑运算符，因为它操作的对象（条件）通常是逻辑运算的结果。
+    赋值运算符 (=, +=, -=, 等)：将右侧表达式计算的值赋给左侧的变量。这是整个表达式或语句的最终目的之一，通常在所有其他计算（包括算术、逻辑、条件判断等）都完成之后才执行。因此，赋值运算符的优先级是最低的。
+    """
     RIGHT_ASSOC = {'=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '?'}
 
     # --- 主要解析方法 ---
-
     def _check_type_start(self):
-        """检查当前 Token 是否可以开始一个 C/C++ 类型说明符 (包括 string)。"""
-        # Handles basic types, const/volatile qualifiers
+        """检查当前 Token 是否可以开始一个 C++ 类型说明符 (包括 string)。"""
         if not self.current_token or self.current_token.type == "EOF":
             return False
-        if self.current_token.type == "KEYWORD" and \
-                self.current_token.value in ["void", "char", "short", "int", "long", "float", "double",
-                                             "signed", "unsigned", "const", "volatile", "_Bool",
-                                             "string",  # Treat string as a type keyword here
-                                             # Add struct, union, enum if needed
-                                             ]:
+        if self.current_token.type == "KEYWORD" and self.current_token.value in cpp_declaration_starters:
             return True
         # TODO: Handle custom type names (typedefs, class/struct names) - requires symbol table access during parsing? Or mark as IDENTIFIER and check later?
-        # For now, only keywords start types.
         return False
 
     def _parse_type(self):
         """解析基本类型说明符序列 (e.g., 'const unsigned long int')。"""
-        type_token = self.current_token  # For error reporting start location
+        type_token = self.current_token
         if not self._check_type_start():
             self._error("Expected type specifier keyword (int, char, float, const, string, etc.)", token=type_token)
-            return None  # Should not be reachable due to check before call usually
-
+            return None
         type_parts = []
         # Keep consuming type-related keywords
         while self.current_token and self._check_type_start():
@@ -152,8 +166,6 @@ class Parser:
             self._error("Internal Parser Error: Failed to parse type specifier parts", token=type_token)
             return None
 
-        # Basic reordering/validation could happen here (e.g., 'int long' -> 'long int')
-        # For simplicity, just join them. Semantic analysis can validate later.
         parsed_type = " ".join(type_parts)
         logging.debug(f"Parsed type specifier: {parsed_type}")
         return parsed_type
@@ -163,10 +175,10 @@ class Parser:
         prog_start_token = self.current_token
         declarations = []
         parse_count = 0
-        max_parse_attempts = 1000  # Safety break for potential infinite loops on errors
+        max_parse_attempts = 1000
 
         while self.current_token and self.current_token.type != "EOF" and parse_count < max_parse_attempts:
-            start_while_token = self.current_token  # Track token at loop start for stuck detection
+            start_while_token = self.current_token
             parse_count += 1
             logging.debug(f"Top-level parse loop iteration {parse_count}, current token: {self.current_token}")
 
@@ -179,32 +191,24 @@ class Parser:
                     ns_token = self._consume('IDENTIFIER', "Expected identifier after 'using namespace'")
                     self._consume('PUNCTUATOR', "Expected ';' after 'using namespace' directive", value=';')
                     logging.info(f"Skipped 'using namespace {ns_token.value};'")
-                    continue  # Skip to next top-level item
-
+                    continue
                 # Handle external declarations (functions or global variables)
                 elif self._check_type_start():
                     logging.debug("Found start of an external declaration (type detected).")
                     decl = self._parse_external_declaration()
-                    if decl:  # Might return None on certain errors
+                    if decl:
                         declarations.append(decl)
-                    # _parse_external_declaration consumes the trailing ';' or '}'
-                    continue  # Move to next declaration
+                    continue
 
-                # Handle stray semicolons at top level
                 elif self._match('PUNCTUATOR', ';'):
                     logging.info("Ignoring empty top-level statement (stray semicolon).")
                     continue
-
-                # If none of the above, it's unexpected
                 else:
                     self._error(
                         f"Unexpected token at top level. Expected type specifier (int, void, etc.), 'using', or ';'")
-                    # Error automatically raises exception
 
             except ParseError as e:
-                print(e, file=sys.stderr)  # Print the specific parse error
-                # --- Stuck detection and recovery ---
-                # If we didn't advance past the token that caused the error, force advance once.
+                print(e, file=sys.stderr)
                 if self.current_token == start_while_token and (
                         self.current_token and self.current_token.type != "EOF"):
                     logging.warning(f"Parser seems stuck on token {self.current_token}. Forcing advance.")
@@ -214,15 +218,12 @@ class Parser:
                         logging.info("EOF reached after forced advance.")
                         break  # Exit loop if EOF reached
 
-                # Attempt to synchronize to the next likely declaration or statement start
                 logging.info("Attempting recovery by synchronizing...")
                 self._synchronize()
-                # Check if synchronization reached EOF
                 if not self.current_token or self.current_token.type == "EOF":
                     logging.info("EOF reached after synchronization.")
-                    break  # Exit loop if EOF reached
+                    break
                 logging.info(f"Resynchronized at token: {self.current_token}. Continuing parse.")
-                # Continue to the next iteration of the while loop
 
         if parse_count >= max_parse_attempts:
             logging.error(
@@ -273,7 +274,6 @@ class Parser:
             self._advance()
 
         logging.info(f"Sync: Reached EOF while synchronizing. Skipped: {' '.join(skipped_tokens_log)}")
-
 
     def _parse_external_declaration(self):
         """解析全局变量或函数定义/原型。假定当前 token 是类型开始。"""
@@ -731,7 +731,6 @@ class Parser:
             # If not a prefix operator or sizeof, parse postfix/primary expression
             return self._parse_postfix_expression()
 
-
     def _parse_postfix_expression(self):
         """解析后缀运算符：(), [], ++, --, ., ->"""
         # First, parse the base primary expression or potential prefix unary result
@@ -782,7 +781,6 @@ class Parser:
                 break
         return expr  # Return the final expression node after all postfix ops applied
 
-    # --- <<< MODIFIED _parse_primary_expression >>> ---
     def _parse_primary_expression(self):
         """解析字面量、标识符、括号表达式和 C 风格类型转换。"""
         token = self.current_token
@@ -883,8 +881,6 @@ class Parser:
             return None
         return node
 
-    # --- <<< END OF MODIFIED _parse_primary_expression >>> ---
-
     def _parse_argument_list(self):
         """解析函数调用参数。 Handles empty list () and list with args."""
         args = []
@@ -917,7 +913,6 @@ class Parser:
         return args
 
 
-# --- AST 打印函数 (包含对 CastExpression 的处理) ---
 def print_ast_tree(node, indent="", last=True, prefix=""):
     """递归打印 AST 树，包含 CastExpression 处理。"""
     if node is None:
@@ -928,55 +923,55 @@ def print_ast_tree(node, indent="", last=True, prefix=""):
     connector = '└── ' if last else '├── '
     node_repr = ""
     children = []  # List of tuples: (prefix, child_node_or_list, is_list_flag)
-    line = getattr(node, 'line', None);
+    line = getattr(node, 'line', None)
     col = getattr(node, 'column', None)
     line_info = f"(L{line}:{col})" if line is not None and col is not None else f"(L{line})" if line is not None else "(NoLoc)"
 
     # --- Node Type Specific Representation ---
     if isinstance(node, Program):
-        node_repr = f"Program {line_info}";
+        node_repr = f"Program {line_info}"
         children = [("declarations", node.declarations)]
     elif isinstance(node, FunctionDefinition):
-        node_repr = f"FunctionDefinition: {node.name.name} (returns: {node.return_type}) {line_info}";
+        node_repr = f"FunctionDefinition: {node.name.name} (returns: {node.return_type}) {line_info}"
         children = [
             ("params", node.params), ("body", node.body)]
     elif isinstance(node, Parameter):
-        name_str = node.name.name if node.name else "<unnamed>";
-        node_repr = f"Parameter: {name_str} (type: {node.param_type}) {line_info}";
+        name_str = node.name.name if node.name else "<unnamed>"
+        node_repr = f"Parameter: {name_str} (type: {node.param_type}) {line_info}"
         children = [
             ("name", node.name)]  # Show name identifier node if exists
     elif isinstance(node, CompoundStatement):
-        node_repr = f"CompoundStatement {line_info}";
+        node_repr = f"CompoundStatement {line_info}"
         children = [("statements", node.statements)]
     elif isinstance(node, DeclarationStatement):
         proto_str = " (prototype)" if getattr(node, 'is_prototype',
-                                              False) else "";
-        node_repr = f"DeclarationStatement: {node.name.name} (type: {node.decl_type}){proto_str} {line_info}";
+                                              False) else ""
+        node_repr = f"DeclarationStatement: {node.name.name} (type: {node.decl_type}){proto_str} {line_info}"
         children = [
-            ("name", node.name), ("initializer", node.initializer)];  # prototype_params handled below if exists
+            ("name", node.name), ("initializer", node.initializer)]  # prototype_params handled below if exists
     elif isinstance(node, ExpressionStatement):
-        node_repr = f"ExpressionStatement {line_info}";
+        node_repr = f"ExpressionStatement {line_info}"
         children = [("expression", node.expression)]
     elif isinstance(node, IfStatement):
-        node_repr = f"IfStatement {line_info}";
+        node_repr = f"IfStatement {line_info}"
         children = [("condition", node.condition), ("then", node.then_branch),
                     ("else", node.else_branch)]
     elif isinstance(node, WhileStatement):
-        node_repr = f"WhileStatement {line_info}";
+        node_repr = f"WhileStatement {line_info}"
         children = [("condition", node.condition), ("body", node.body)]
     elif isinstance(node, ForStatement):
-        node_repr = f"ForStatement {line_info}";
+        node_repr = f"ForStatement {line_info}"
         children = [("init", node.init), ("condition", node.condition),
                     ("update", node.update), ("body", node.body)]
     elif isinstance(node, DoWhileStatement):
-        node_repr = f"DoWhileStatement {line_info}";
+        node_repr = f"DoWhileStatement {line_info}"
         children = [("body", node.body), ("condition", node.condition)]
     elif isinstance(node, BreakStatement):
         node_repr = f"BreakStatement {line_info}"
     elif isinstance(node, ContinueStatement):
         node_repr = f"ContinueStatement {line_info}"
     elif isinstance(node, ReturnStatement):
-        node_repr = f"ReturnStatement {line_info}";
+        node_repr = f"ReturnStatement {line_info}"
         children = [("value", node.value)]
     elif isinstance(node, Identifier):
         node_repr = f"Identifier: {node.name} {line_info}"
@@ -989,44 +984,44 @@ def print_ast_tree(node, indent="", last=True, prefix=""):
     elif isinstance(node, CharLiteral):
         node_repr = f"CharLiteral: {repr(node.value)} {line_info}"
     elif isinstance(node, BinaryOp):
-        node_repr = f"BinaryOp: '{node.op}' {line_info}";
+        node_repr = f"BinaryOp: '{node.op}' {line_info}"
         children = [("left", node.left), ("right", node.right)]
     elif isinstance(node, UnaryOp):
-        op_display = node.op;
-        operand_val = node.operand;
+        op_display = node.op
+        operand_val = node.operand
         is_sizeof_type = op_display == 'sizeof' and isinstance(
             operand_val,
-            str);
-        op_prefix = "type" if is_sizeof_type else "operand";
-        node_repr = f"UnaryOp: '{op_display}' {line_info}";
+            str)
+        op_prefix = "type" if is_sizeof_type else "operand"
+        node_repr = f"UnaryOp: '{op_display}' {line_info}"
         children = [
             (op_prefix, operand_val)]
     elif isinstance(node, CallExpression):
-        node_repr = f"CallExpression {line_info}";
+        node_repr = f"CallExpression {line_info}"
         children = [("function", node.function), ("arguments", node.args)]
     elif isinstance(node, ArraySubscript):
-        node_repr = f"ArraySubscript {line_info}";
+        node_repr = f"ArraySubscript {line_info}"
         children = [("array", node.array_expression),
                     ("index", node.index_expression)]
     elif isinstance(node, MemberAccess):
-        op = '->' if node.is_pointer_access else '.';
-        node_repr = f"MemberAccess: {op}{node.member_identifier.name} {line_info}";
+        op = '->' if node.is_pointer_access else '.'
+        node_repr = f"MemberAccess: {op}{node.member_identifier.name} {line_info}"
         children = [
             ("object", node.object_or_pointer_expression), ("memberId", node.member_identifier)]
     # --- <<< Handle CastExpression >>> ---
     elif isinstance(node, CastExpression):
-        node_repr = f"CastExpression: (to type='{node.target_type}') {line_info}";
+        node_repr = f"CastExpression: (to type='{node.target_type}') {line_info}"
         children = [
             ("expression", node.expression)]
     # --- <<< End Handle CastExpression >>> ---
     elif isinstance(node, ASTNode):  # Fallback for other potential AST nodes
-        node_repr = f"{type(node).__name__} {line_info}";
+        node_repr = f"{type(node).__name__} {line_info}"
         children = [(attr, v) for attr, v in vars(node).items() if isinstance(v, (ASTNode, list))]  # Basic inspection
     elif isinstance(node, str):  # Handle simple string children (like sizeof type operand)
-        print(f"{indent}{connector}{prefix}String: '{node}'");
+        print(f"{indent}{connector}{prefix}String: '{node}'")
         return
     else:  # Handle other unexpected types
-        print(f"{indent}{connector}{prefix}{repr(node)}");
+        print(f"{indent}{connector}{prefix}{repr(node)}")
         return
 
     # Add prototype parameters if they exist
@@ -1071,7 +1066,6 @@ def print_ast_tree(node, indent="", last=True, prefix=""):
             print(f"{new_indent}{'└── ' if is_last_child else '├── '}{current_prefix}{repr(child_node_or_list)}")
 
 
-# --- Main execution block (for standalone testing) ---
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print(f"用法: python parser.py <input_file.cpp>", file=sys.stderr)
@@ -1095,10 +1089,10 @@ if __name__ == "__main__":
             raw_code = infile.read()
         print("File reading complete.")
     except FileNotFoundError:
-        print(f"Error: File '{input_file_path}' not found.", file=sys.stderr);
+        print(f"Error: File '{input_file_path}' not found.", file=sys.stderr)
         had_errors = True
     except Exception as e:
-        print(f"Error reading file: {e}", file=sys.stderr);
+        print(f"Error reading file: {e}", file=sys.stderr)
         had_errors = True
 
     # --- Stage 2: Preprocessing (Optional) ---
@@ -1113,14 +1107,14 @@ if __name__ == "__main__":
             print("Preprocessing complete.")
             # Optionally print processed code and map
         except ImportError:
-            print("Warning: preprocess.py not found. Skipping preprocessing stage.");
-            processed_code = raw_code;
-            num_lines = raw_code.count('\n') + 1;
+            print("Warning: preprocess.py not found. Skipping preprocessing stage.")
+            processed_code = raw_code
+            num_lines = raw_code.count('\n') + 1
             line_map = {i: i for i in range(1, num_lines + 1)}
         except Exception as e:
-            print(f"Error during preprocessing: {e}. Using raw code.", file=sys.stderr);
-            processed_code = raw_code;
-            num_lines = raw_code.count('\n') + 1;
+            print(f"Error during preprocessing: {e}. Using raw code.", file=sys.stderr)
+            processed_code = raw_code
+            num_lines = raw_code.count('\n') + 1
             line_map = {i: i for i in range(1, num_lines + 1)}
 
     # --- Stage 3: Lexical Analysis ---
@@ -1133,13 +1127,13 @@ if __name__ == "__main__":
             token_list = list(lexer.tokenize())  # Store as list
             print(f"Lexical analysis complete. Generated {len(token_list)} tokens.")
         except LexerError as e:
-            print(e, file=sys.stderr);
+            print(e, file=sys.stderr)
             had_errors = True
         except Exception as e:
-            print(f"Unexpected Lexer Error: {e}", file=sys.stderr);
-            import traceback;
+            print(f"Unexpected Lexer Error: {e}", file=sys.stderr)
+            import traceback
 
-            traceback.print_exc();
+            traceback.print_exc()
             had_errors = True
 
     # --- Stage 4: Syntax Analysis (Parsing) ---

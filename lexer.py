@@ -34,21 +34,20 @@ class Lexer:
         self.column = 1
         self.tokens = []
         self.line_mapping = line_mapping
+        # 预定义的 C++ 关键字
         self.keywords = {
-            'auto', 'break', 'case', 'char', 'const', 'continue', 'default', 'do',
-            'double', 'else', 'enum', 'extern', 'float', 'for', 'goto', 'if',
-            'inline', 'int', 'long', 'string', 'register', 'restrict', 'return', 'short',
-            'signed', 'sizeof', 'static', 'struct', 'switch', 'typedef', 'union',
-            'unsigned', 'void', 'volatile', 'while',
-            '_Bool', '_Complex', '_Imaginary',
-            'alignas', 'alignof', 'and', 'and_eq', 'asm', 'bitand', 'bitor', 'bool',
-            'catch', 'class', 'compl', 'const_cast', 'decltype', 'delete',
-            'dynamic_cast', 'explicit', 'export', 'false', 'friend', 'mutable',
-            'namespace', 'new', 'noexcept', 'not', 'not_eq', 'nullptr', 'operator',
-            'or', 'or_eq', 'private', 'protected', 'public', 'reinterpret_cast',
-            'static_assert', 'static_cast', 'template', 'this', 'thread_local',
-            'throw', 'true', 'try', 'typeid', 'typename', 'using', 'virtual',
-            'wchar_t', 'xor', 'xor_eq',
+            'alignas', 'alignof', 'and', 'and_eq', 'asm', 'auto', 'bitand', 'bitor', 'bool',
+            'break', 'case', 'catch', 'char', 'class', 'compl', 'concept', 'const',
+            'const_cast', 'consteval', 'constinit', 'constexpr', 'continue', 'decltype',
+            'default', 'delete', 'do', 'double', 'dynamic_cast', 'else', 'enum', 'explicit',
+            'export', 'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline',
+            'int', 'long', 'mutable', 'namespace', 'new', 'noexcept', 'not', 'not_eq',
+            'nullptr', 'operator', 'or', 'or_eq', 'private', 'protected', 'public',
+            'reinterpret_cast', 'register', 'requires', 'restrict', 'return', 'short',
+            'signed', 'sizeof', 'static', 'static_assert', 'static_cast', 'struct',
+            'switch', 'template', 'this', 'thread_local', 'throw', 'true', 'try', 'typeid',
+            'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile',
+            'wchar_t', 'while', 'xor', 'xor_eq', 'string'
         }
         self.token_specs = [
             ('COMMENT_MULTI', r'/\*.*?\*/'),
@@ -84,10 +83,12 @@ class Lexer:
             if s[i] == '\\':
                 if i + 1 < len(s):
                     esc2 = s[i:i + 2]
+                    # 转义字符替换 例如\t, \r, \\, \', \", \a, \b, \f, \v, \?
                     if esc2 in escape_map:
                         out += escape_map[esc2]
                         i += 2
                         continue
+                    # 八进制转义字符且长度不超过3
                     elif s[i + 1] >= '0' and s[i + 1] <= '7':
                         j = i + 1
                         while j < len(s) and s[j] >= '0' and s[j] <= '7' and (j - i - 1) < 3: j += 1
@@ -95,6 +96,7 @@ class Lexer:
                         out += chr(octal_val)
                         i = j
                         continue
+                    # 十六进制转义字符且长度无限制
                     elif s[i + 1] in ('x', 'X') and i + 2 < len(s) and s[i + 2] in '0123456789abcdefABCDEF':
                         j = i + 2
                         while j < len(s) and s[j] in '0123456789abcdefABCDEF': j += 1
@@ -186,7 +188,6 @@ class Lexer:
         return self.tokens
 
 
-# --- Main block for testing lexer ---
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("用法: python lexer.py <input_file.cpp>")
@@ -238,3 +239,39 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"发生未预料的错误: {e}", exc_info=True)
         sys.exit(1)
+
+"""
+这是一个简单的 C/C++ 风格词法分析器（Lexer）实现。
+它读取源代码文件（可选地先通过预处理器处理），并将其分解成一系列 Tokens。
+
+功能:
+1. 读取指定的源代码文件。
+2. 尝试导入并使用同目录下的 `preprocess.py` 中的 `BasicPreprocessor`。
+   如果成功，将对预处理后的代码进行词法分析，并使用预处理器生成的行号映射。
+   如果失败（文件不存在或预处理错误），将直接对原始代码进行词法分析（此时行号映射为 1:1）。
+3. 根据预定义的词法规则（通过正则表达式定义）扫描代码。
+4. 识别并生成不同类型的 Token，包括：
+   - 关键字 (Keywords)，如 `if`, `while`, `int` 等。
+   - 标识符 (Identifiers)，如变量名、函数名等。
+   - 字面值 (Literals)：整数、浮点数、字符串（含原始字符串）、字符。
+   - 运算符 (Operators)，如 `+`, `=`, `==`, `->` 等。
+   - 标点符号 (Punctuators)，如 `{}`, `()`, `;` 等。
+5. 忽略空白符、换行符和注释，但使用它们来计算和更新词法分析器在代码中的当前位置（行号和列号）。
+6. 为每个识别出的 Token 记录其在**原始文件**中的位置（行号和列号），即使代码经过了预处理。
+7. 处理字符串和字符字面值中的标准转义序列（如 '\n', '\t', '\x', '\ddd'）。
+8. 在扫描过程中，如果遇到任何无法识别的字符序列，则报告词法错误，并指出错误在原始文件中的位置。
+9. 在成功扫描完所有代码后，添加一个特殊的 `EOF` (End-of-File) Token 表示输入结束。
+
+输出:
+成功运行时，会将识别出的所有 Token 打印到标准输出。每个 Token 显示其类型、代表的值以及它在原始源代码中的行号和列号。
+遇到错误时，会将错误信息（包含位置）打印到标准错误。
+
+使用方法:
+在命令行终端中运行此脚本，并提供一个输入源代码文件路径作为唯一的命令行参数：
+python 你的词法分析器文件名.py <输入文件路径>
+
+示例:
+python basic_lexer.py main.cpp
+
+*** 这是一个基础实现，用于演示词法分析器的核心概念。它可能不支持所有编程语言的复杂词法规则或高级特性。依赖于 `token_specs` 中正则表达式的准确性和顺序。
+"""
