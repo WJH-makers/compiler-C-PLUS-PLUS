@@ -38,6 +38,62 @@ class LexerError(Exception):
         self.column = column
 
 
+def _interpret_escapes(s):
+    """解释字符串和字符字面量中的转义序列。"""
+    escape_map = {'\\n': '\n', '\\t': '\t', '\\r': '\r', '\\\\': '\\', '\\\'': '\'', '\\"': '"', '\\a': '\a',
+                  '\\b': '\b', '\\f': '\f', '\\v': '\v', '\\?': '?'}
+    out = ""
+    i = 0
+    while i < len(s):
+        if s[i] == '\\':
+            if i + 1 < len(s):
+                esc2 = s[i:i + 2]
+                if esc2 in escape_map:
+                    out += escape_map[esc2]
+                    i += 2
+                    continue
+                elif '0' <= s[i + 1] <= '7':  # 八进制
+                    j = i + 1
+                    while j < len(s) and '0' <= s[j] <= '7' and (j - i - 1) < 3: j += 1
+                    try:
+                        octal_val = int(s[i + 1:j], 8)
+                        out += chr(octal_val)
+                    except ValueError:
+                        logging.warning(f"Invalid octal escape sequence: \\{s[i + 1:j]}")
+                        out += s[
+                            i]  # Keep backslash if invalid
+                    i = j
+                    continue
+                elif s[i + 1] in ('x', 'X'):  # 十六进制
+                    j = i + 2
+                    while j < len(s) and s[j] in '0123456789abcdefABCDEF': j += 1
+                    if j > i + 2:
+                        try:
+                            hex_val = int(s[i + 2:j], 16)
+                            out += chr(hex_val)
+                        except ValueError:
+                            logging.warning(f"Invalid hex escape sequence: \\{s[i + 1:j]}")
+                            out += s[i]
+                        i = j
+                        continue
+                    else:  # \x 后没有有效数字
+                        logging.warning(f"Incomplete hex escape sequence: \\{s[i + 1:]}")
+                        out += s[i]
+                        i += 1
+                        continue
+                else:  # 其他未识别的转义符 (例如 \c)，通常行为是忽略反斜杠
+                    out += s[i + 1]
+                    i += 2
+                    continue
+            else:  # 字符串末尾的反斜杠
+                out += s[i]
+                i += 1
+                continue
+        out += s[i]
+        i += 1
+    return out
+
+
 class Lexer:
     def __init__(self, code, line_mapping):
         if code is None:
@@ -47,7 +103,6 @@ class Lexer:
         self.processed_line = 1
         self.column = 1
         self.tokens = []
-        # 确保 line_mapping 是有效的字典，或者创建一个默认映射
         if not isinstance(line_mapping, dict):
             logging.warning("Invalid line_mapping provided to Lexer, creating default map.")
             num_lines = code.count('\n') + 1
@@ -55,7 +110,6 @@ class Lexer:
         else:
             self.line_mapping = line_mapping
 
-        # 预定义的 C++ 关键字
         self.keywords = {
             'alignas', 'alignof', 'and', 'and_eq', 'asm', 'auto', 'bitand', 'bitor', 'bool',
             'break', 'case', 'catch', 'char', 'class', 'compl', 'concept', 'const',
@@ -70,7 +124,6 @@ class Lexer:
             'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile',
             'wchar_t', 'while', 'xor', 'xor_eq', 'string'
         }
-        # --- <<< 修正后的 token_specs >>> ---
         self.token_specs = [
             ('COMMENT_MULTI', r'/\*.*?\*/'),  # 多行注释
             ('COMMENT_SINGLE', r'//.*'),  # 单行注释
@@ -106,61 +159,6 @@ class Lexer:
         ]
         self.master_regex = re.compile('|'.join(f'(?P<{name}>{pattern})' for name, pattern in self.token_specs),
                                        re.DOTALL)
-
-    def _interpret_escapes(self, s):
-        """解释字符串和字符字面量中的转义序列。"""
-        escape_map = {'\\n': '\n', '\\t': '\t', '\\r': '\r', '\\\\': '\\', '\\\'': '\'', '\\"': '"', '\\a': '\a',
-                      '\\b': '\b', '\\f': '\f', '\\v': '\v', '\\?': '?'}
-        out = "";
-        i = 0
-        while i < len(s):
-            if s[i] == '\\':
-                if i + 1 < len(s):
-                    esc2 = s[i:i + 2]
-                    if esc2 in escape_map:
-                        out += escape_map[esc2];
-                        i += 2;
-                        continue
-                    elif s[i + 1] >= '0' and s[i + 1] <= '7':  # 八进制
-                        j = i + 1;
-                        while j < len(s) and s[j] >= '0' and s[j] <= '7' and (j - i - 1) < 3: j += 1
-                        try:
-                            octal_val = int(s[i + 1:j], 8);
-                            out += chr(octal_val)
-                        except ValueError:
-                            logging.warning(f"Invalid octal escape sequence: \\{s[i + 1:j]}");
-                            out += s[
-                                i]  # Keep backslash if invalid
-                        i = j;
-                        continue
-                    elif s[i + 1] in ('x', 'X'):  # 十六进制
-                        j = i + 2;
-                        while j < len(s) and s[j] in '0123456789abcdefABCDEF': j += 1
-                        if j > i + 2:
-                            try:
-                                hex_val = int(s[i + 2:j], 16);
-                                out += chr(hex_val)
-                            except ValueError:
-                                logging.warning(f"Invalid hex escape sequence: \\{s[i + 1:j]}");
-                                out += s[i]
-                            i = j;
-                            continue
-                        else:  # \x 后没有有效数字
-                            logging.warning(f"Incomplete hex escape sequence: \\{s[i + 1:]}");
-                            out += s[i];
-                            i += 1;
-                            continue
-                    else:  # 其他未识别的转义符 (例如 \c)，通常行为是忽略反斜杠
-                        out += s[i + 1];
-                        i += 2;
-                        continue
-                else:  # 字符串末尾的反斜杠
-                    out += s[i];
-                    i += 1;
-                    continue
-            out += s[i];
-            i += 1
-        return out
 
     def _get_original_line(self, processed_line_num):
         """根据处理后的行号获取原始行号。"""
@@ -223,20 +221,17 @@ class Lexer:
                 prefix_len = prefix_match.end() if prefix_match else 0
                 # +1 跳过前缀和开头的单引号, -1 跳过结尾的单引号
                 char_content = token_value[prefix_len + 1: -1]
-                token_value = self._interpret_escapes(char_content)
+                token_value = _interpret_escapes(char_content)
                 # C++ 字符字面量通常只包含一个字符（或转义表示的一个字符）
                 if len(token_value) != 1:
                     logging.warning(f"Multi-character char literal L{current_original_line}:C{start_column}: {value}")
-                    # 根据需要，可以报错或取第一个字符
-                    # token_value = token_value[0] if token_value else '' # 取第一个
             elif kind == 'STRING_LITERAL':
                 token_type = 'STRING_LITERAL'
-                # 提取引号内的内容并处理转义
                 prefix_match = re.match(r'(u8|[uUL])?', token_value)
                 prefix_len = prefix_match.end() if prefix_match else 0
                 # +1 跳过前缀和开头的双引号, -1 跳过结尾的双引号
                 string_content = token_value[prefix_len + 1: -1]
-                token_value = self._interpret_escapes(string_content)
+                token_value = _interpret_escapes(string_content)
             elif kind == 'RAW_STRING_LITERAL':
                 token_type = 'STRING_LITERAL'  # 类型仍是字符串
                 token_value = match.group('content')  # 值是括号内的内容，无需转义
@@ -280,7 +275,6 @@ class Lexer:
         return self.tokens
 
 
-# --- 主执行块 (用于独立测试词法分析器) ---
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("用法: python lexer.py <input_file.cpp>")
@@ -290,12 +284,10 @@ if __name__ == "__main__":
     raw_code = None
     processed_code = None
     line_map = {}
-
     try:
         logging.info(f"正在读取文件: {input_file_path}")
         with open(input_file_path, 'r', encoding='utf-8') as infile:
             raw_code = infile.read()
-
         # --- 可选的预处理步骤 ---
         if BasicPreprocessor:  # 检查预处理器是否成功导入
             try:
@@ -313,7 +305,6 @@ if __name__ == "__main__":
             processed_code = raw_code
             num_lines = raw_code.count('\n') + 1
             line_map = {i: i for i in range(1, num_lines + 1)}
-
         # --- 执行词法分析 ---
         if processed_code is not None:
             logging.info("正在进行词法分析...")
@@ -326,7 +317,6 @@ if __name__ == "__main__":
         else:
             logging.error("错误：没有可供词法分析的代码。")
             sys.exit(1)
-
     except FileNotFoundError:
         logging.error(f"错误: 文件 '{input_file_path}' 未找到")
         sys.exit(1)

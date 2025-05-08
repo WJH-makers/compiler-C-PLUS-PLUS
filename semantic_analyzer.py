@@ -1,56 +1,20 @@
 # coding=utf-8
 import logging
-import sys
 
-# --- AST Node Definitions ---
-# 确保 compiler_ast.py 在同一目录或 PYTHONPATH 中
-try:
-    from compiler_ast import (
-        ASTNode, Program, FunctionDefinition, Parameter, CompoundStatement,
-        DeclarationStatement, AssignmentStatement, ExpressionStatement,
-        IfStatement, WhileStatement, ForStatement, DoWhileStatement,
-        BreakStatement, ContinueStatement, ReturnStatement, Identifier,
-        IntegerLiteral, FloatLiteral, StringLiteral, CharLiteral,
-        BinaryOp, UnaryOp, CallExpression, ArraySubscript, MemberAccess,
-        CastExpression  # 确保导入 CastExpression
-    )
-except ImportError as e:
-    print(f"严重错误：无法从 compiler_ast.py 导入 AST 节点定义。\n{e}", file=sys.stderr)
-    # 为消除警告而添加的虚拟定义（在此代码中非必需）
-    ASTNode, Program, FunctionDefinition, Parameter, CompoundStatement = (None,) * 5
-    DeclarationStatement, AssignmentStatement, ExpressionStatement = (None,) * 3
-    IfStatement, WhileStatement, ForStatement, DoWhileStatement = (None,) * 4
-    BreakStatement, ContinueStatement, ReturnStatement, Identifier = (None,) * 4
-    IntegerLiteral, FloatLiteral, StringLiteral, CharLiteral = (None,) * 4
-    BinaryOp, UnaryOp, CallExpression, ArraySubscript, MemberAccess = (None,) * 5
-    CastExpression = None
-    sys.exit(1)
+from compiler_ast import *
+from lexer import LexerError, Lexer
+from parser import ParseError, Parser
+from preprocess import BasicPreprocessor
 
-# --- Lexer and Parser ---
-# 假设这些已正确定义和导入
-try:
-    from lexer import LexerError, Lexer
-    from parser import ParseError, Parser  # 导入 Parser 以便运行完整流程
-    # 尝试导入 preprocess 以便在主块中使用
-    from preprocess import BasicPreprocessor
-except ImportError as e:
-    print(f"警告：无法导入 Lexer, Parser, 或 BasicPreprocessor。独立执行可能失败。\n{e}", file=sys.stderr)
-    LexerError, Lexer = None, None
-    ParseError, Parser = None, None
-    BasicPreprocessor = None
-
-# --- 日志配置 ---
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
-# === 语义分析组件 ===
 
 class SemanticError(Exception):
     """用于语义错误的自定义异常。"""
 
     def __init__(self, message, node):
         location = "UnknownLocation"
-        # 尝试从节点获取位置信息
         if node and hasattr(node, 'line') and node.line is not None:
             location = f"L{node.line}"
             if hasattr(node, 'column') and node.column is not None:
@@ -218,7 +182,6 @@ def make_pointer_type(base_type):
         return "* "  # 或者抛出错误？
 
 
-# --- <<< MODIFIED type_compatible Function >>> ---
 def type_compatible(target_type, value_type, allow_numeric_conv=True, assignment_context=False, node_for_value=None):
     """
     Checks if value_type can be implicitly converted/assigned to target_type.
@@ -242,7 +205,6 @@ def type_compatible(target_type, value_type, allow_numeric_conv=True, assignment
         if value_type in ['char*', 'const char*', 'char']:
             logging.debug(f"Allowing assignment/append: '{value_type}' -> '{target_type}'")
             return True
-        # <<< END MODIFICATION >>>
 
     # --- Rule: Pointer compatibility ---
     target_ptr_base = get_pointer_base_type(target_type)
@@ -284,12 +246,7 @@ def type_compatible(target_type, value_type, allow_numeric_conv=True, assignment
     logging.debug(f"Types incompatible by default: '{value_type}' cannot convert/assign to '{target_type}'")
     return False
 
-
-# --- <<< END MODIFIED type_compatible Function >>> ---
-
-
 # === 语义分析器类 ===
-
 class SemanticAnalyzer:
     """
     对 Parser 生成的 AST 执行语义分析。
@@ -298,7 +255,6 @@ class SemanticAnalyzer:
     - 用确定的语义类型（例如, 'int', 'float*', 'error_type'）注释 AST 节点。
     - 检测语义错误，如未声明的变量、类型不匹配等。
     """
-
     def __init__(self):
         self.symbol_table = SymbolTable()
         self.errors = []  # 存储 SemanticError 消息的列表
@@ -309,26 +265,19 @@ class SemanticAnalyzer:
         """将常见的标准库符号添加到全局作用域。"""
         logging.info("Predefining standard library symbols...")
         global_scope = self.symbol_table.scopes[0]
-        # 模拟 cout 和 endl
         global_scope['cout'] = Symbol(name='cout', type='std::ostream', kind='variable', node=None)
         global_scope['endl'] = Symbol(name='endl', type='manipulator', kind='variable', node=None)
-        # 模拟 std::to_string 重载
-        # 注意：您 C++ 代码中的 to_string 只接受 int。这里模拟标准库行为。
         global_scope['to_string'] = Symbol(
             name='to_string', type='function overload', kind='function',
             params=[['int'], ['float']],  # 参数类型列表的列表
             return_type='string', node=None
         )
-        # 添加您自定义的 printMessage
-        # 需要知道其参数类型和返回类型
         printMessage_params = [Symbol('msg', 'const char*', kind='parameter')]  # 创建参数符号
         global_scope['printMessage'] = Symbol(
             name='printMessage', type='function(const char*) returning void', kind='function',
             params=printMessage_params, return_type='void', node=None  # 提供参数符号列表
         )
-
         logging.info(f"Predefined symbols: {list(global_scope.keys())}")
-
     def error(self, message, node):
         """记录并记录语义错误，避免重复。"""
         try:
@@ -442,12 +391,10 @@ class SemanticAnalyzer:
                        (isinstance(lvalue_node, UnaryOp) and lvalue_node.op == '*')
         if not is_lvalue_ok:
             self.error("Left-hand side of assignment is not assignable (not an lvalue)", lvalue_node)
-            # 即使出错，也继续进行类型检查
 
         # 阻止对 const 变量的赋值（初始化在 DeclarationStatement 中处理）
         if lvalue_type.startswith('const '):
             self.error(f"Cannot assign to constant lvalue of type '{lvalue_type}'", lvalue_node)
-            # 即使类型兼容，这也是一个错误
 
         # 检查类型兼容性
         if lvalue_type != "error_type" and expr_type != "error_type":
@@ -513,9 +460,6 @@ class SemanticAnalyzer:
                 elif base_op == '+' and left_type == 'string' and \
                         right_type in ['string', 'char*', 'const char*', 'char']:  # << type_compatible 已经允许了，这里再次确认操作有效
                     valid_compound = True
-                # (可选) 检查非标准 string += int
-                # elif base_op == '+' and left_type == 'string' and right_type == 'int':
-                #     logging.warning(...) valid_compound = True
 
                 if not valid_compound:
                     # 如果 type_compatible 允许，但操作对这些类型无效（例如 float %= float）
@@ -538,7 +482,6 @@ class SemanticAnalyzer:
                 if strip_const(right_type) in allowed_stream_types or \
                         get_pointer_base_type(right_type) == 'char' or \
                         right_type == 'manipulator':
-                    # 流插入的结果是流本身
                     return 'std::ostream'
                 else:
                     self.error(f"Cannot apply '<<' to 'std::ostream' and operand of type '{right_type}'", node)
@@ -698,7 +641,6 @@ class SemanticAnalyzer:
             self.error("'break' statement not in loop or switch", node)
         return None  # 语句没有类型
 
-    # --- visit_CastExpression 已添加 ---
     def visit_CastExpression(self, node):
         """分析 C 风格的类型转换表达式 (type)expr。"""
         target_type = node.target_type  # 要转换到的类型 (字符串)
@@ -708,7 +650,6 @@ class SemanticAnalyzer:
             return "error_type"  # 传播错误
 
         # 基本的转换验证 (根据需要用更多 C++ 规则扩展)
-
         # 规则 1: 数值类型可以相互转换 (int, float, char, _Bool)
         is_target_numeric = is_numeric(target_type)
         is_expr_numeric = is_numeric(expr_type)
@@ -835,7 +776,6 @@ class SemanticAnalyzer:
                 if existing_symbol.kind != 'function':
                     self.error(f"'{func_name}' previously declared as {existing_symbol.kind}", node.name)
                     return None
-                # TODO: Add checks for return type and parameter compatibility here
                 logging.debug(f"Prototype matches existing declaration for '{func_name}'.")
             except SemanticError as e:
                 if "not declared" in str(e):
@@ -908,7 +848,6 @@ class SemanticAnalyzer:
         self.loop_depth -= 1
         return None
 
-    # --- visit_FunctionDefinition (Corrected Indentation) ---
     def visit_FunctionDefinition(self, node):
         """分析函数定义，添加/更新符号，处理作用域。"""
         func_name = node.name.name
@@ -951,7 +890,6 @@ class SemanticAnalyzer:
                 func_symbol.node = node
                 func_symbol.params = param_symbols
                 func_symbol.return_type = return_type
-                # TODO: Add prototype vs definition compatibility checks here
             else:
                 self.error(f"'{func_name}' previously declared as non-function {existing_symbol.kind}", node.name)
                 return None
@@ -995,8 +933,6 @@ class SemanticAnalyzer:
         self.symbol_table.exit_scope()
         self.symbol_table.set_current_function(None)
         return None
-
-    # --- <<< END visit_FunctionDefinition >>> ---
 
     def visit_Identifier(self, node):
         """查找标识符，返回其类型。"""
@@ -1188,10 +1124,7 @@ class SemanticAnalyzer:
             return False
 
 
-# === 带注释的 AST 打印函数 ===
 def print_annotated_ast(node, indent="", prefix="", is_last=True):
-    """递归打印 AST，如果存在，则包括 'semantic_type' 注释。"""
-    # (代码与上一个回复中的 print_annotated_ast 相同，此处省略以简洁)
     if node is None:
         return
     connector = "└── " if is_last else "├── "
@@ -1374,10 +1307,9 @@ if __name__ == "__main__":
 
     # --- 阶段 5: 语义分析 ---
     if not had_errors and ast is not None:
-        # print("\n--- Stage 5: Semantic Analysis ---") # 已在 analyze 方法内部打印
         try:
             analyzer = SemanticAnalyzer()
-            semantic_success = analyzer.analyze(ast)  # analyze 方法会打印其开始和结束消息
+            semantic_success = analyzer.analyze(ast)
             if semantic_success:
                 print("\n--- Final Annotated AST ---")
                 print_annotated_ast(ast)
@@ -1389,7 +1321,6 @@ if __name__ == "__main__":
             print(f"意外的语义分析错误: {e}", file=sys.stderr)
             logging.exception("语义分析器崩溃")
             had_errors = True
-            # semantic_success = False # 已默认为 False 或被设为 False
 
     print("\n--- Compilation Summary ---")
     if had_errors:

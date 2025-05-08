@@ -9,29 +9,49 @@ from parser import Parser, ParseError
 from preprocess import BasicPreprocessor
 from semantic_analyzer import SemanticAnalyzer, print_annotated_ast  # 用于主程序驱动
 
-# --- AST Node Definitions ---
 try:
-    from compiler_ast import (
-        ASTNode, Program, FunctionDefinition, Parameter, CompoundStatement,
-        DeclarationStatement, AssignmentStatement, ExpressionStatement,
-        IfStatement, WhileStatement, ForStatement, DoWhileStatement,
-        BreakStatement, ContinueStatement, ReturnStatement, Identifier,
-        IntegerLiteral, FloatLiteral, StringLiteral, CharLiteral,
-        BinaryOp, UnaryOp, CallExpression, ArraySubscript, MemberAccess,
-        CastExpression, BooleanLiteral, NullPtrLiteral, TernaryOp  # 确保所有用到的AST节点都已导入
-    )
+    from compiler_ast import *
 except ImportError as e:
     print(f"警告: 无法从 compiler_ast.py 导入 AST 节点。某些功能可能受限或出错。\n{e}", file=sys.stderr)
-    # 在实际项目中，这里应该导致错误退出，或者您需要提供所有AST节点的虚拟定义
-    # 为了让代码能运行，这里只打印警告。实际使用时，您需要确保 compiler_ast.py 可用。
-    ASTNode = type('ASTNode', (object,), {})  # 最小化的虚拟定义
-    # ... (可以为其他节点添加类似的最小化虚拟定义，但这只是为了避免 NameError)
-    # 更好的做法是确保 compiler_ast.py 存在且包含所有定义
+    ASTNode = type('ASTNode', (object,), {})
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(lineno)d: %(message)s')
-# 要查看详细的TAC生成步骤，可以取消注释下一行
-# logging.basicConfig(level=logging.DEBUG, format='%(levelname)s:%(name)s:%(lineno)d: %(message)s')
 log = logging.getLogger(__name__)
+
+
+def visit_NullPtrLiteral(node):  # 新增
+    log.debug("访问 NullPtrLiteral")
+    return 0  # nullptr 通常表示为地址 0
+
+
+def visit_BooleanLiteral(node):  # 新增
+    log.debug(f"访问 BooleanLiteral: {node.value}")
+    return 1 if node.value else 0  # C++ 中 bool 通常用 1/0
+
+
+def visit_CharLiteral(node):
+    log.debug(f"访问 CharLiteral: {repr(node.value)}")
+    return repr(node.value)  # 返回带引号的字符表示
+
+
+def visit_StringLiteral(node):
+    log.debug(f"访问 StringLiteral: {repr(node.value)}")
+    return repr(node.value)  # 返回带引号的字符串表示
+
+
+def visit_FloatLiteral(node):
+    log.debug(f"访问 FloatLiteral: {node.value}")
+    return node.value
+
+
+def visit_IntegerLiteral(node):
+    log.debug(f"访问 IntegerLiteral: {node.value}")
+    return node.value
+
+
+def visit_Identifier(node):
+    log.debug(f"访问 Identifier: {node.name}")
+    return node.name
 
 
 class TACGenerator:
@@ -40,7 +60,6 @@ class TACGenerator:
         self.temp_count = 0  # 用于生成唯一临时变量名的计数器
         self.label_count = 0  # 用于生成唯一标签名的计数器
         self.loop_context_stack = []  # 用于 break/continue: [(continue_label, break_label), ...]
-        # self.current_function_name = None # (如果需要跟踪函数上下文可以取消注释)
 
     def _new_temp(self):
         """生成一个新的、唯一的临时变量名 (例如: _t0, _t1)。"""
@@ -87,10 +106,7 @@ class TACGenerator:
 
         if isinstance(node, (int, float)):  # bool 会被 int 处理
             return node
-        if isinstance(node, str):  # 字符串字面量可能需要特殊处理
-            # 如果这个字符串是标识符名，则返回它
-            # 如果是字符串字面量的值，则返回其带引号的表示
-            # visit_StringLiteral 会处理字符串字面量
+        if isinstance(node, str):
             return node
 
         method_name = 'visit_' + type(node).__name__
@@ -212,7 +228,6 @@ class TACGenerator:
 
         # 2. 创建循环标签
         cond_label = self._new_label("FOR_COND")
-        # body_label = self._new_label("FOR_BODY") # 如果需要，可以有单独的body标签
         update_label = self._new_label("FOR_UPDATE")
         end_label = self._new_label("FOR_END")
 
@@ -239,7 +254,6 @@ class TACGenerator:
             pass  # Continues to body
 
         # 5. 循环体 (Body)
-        # self._emit('LABEL', body_label) # 可选
         log.debug("  处理 ForStatement.body")
         self.visit(node.body)  # Body is visited before update
 
@@ -270,9 +284,6 @@ class TACGenerator:
         # cond_label = self._new_label("DO_WHILE_COND") # 条件判断标签
         end_label = self._new_label("DO_WHILE_END")  # 循环结束标签
 
-        # `continue` 在 do-while 中通常跳到条件判断之前，或循环体末尾准备判断条件
-        # 这里我们让 continue 跳到条件评估的地方（循环末尾）
-        # `break` 跳到 end_label
         self.loop_context_stack.append({'continue': start_label, 'break': end_label})  # continue 跳到条件判断处
         log.debug(f"  压入循环上下文 (DoWhile): continue_label={start_label}, break_label={end_label}")
 
@@ -326,34 +337,6 @@ class TACGenerator:
         log.debug(f"  生成 Continue: goto {continue_label}")
         return None
 
-    def visit_Identifier(self, node):
-        log.debug(f"访问 Identifier: {node.name}")
-        return node.name
-
-    def visit_IntegerLiteral(self, node):
-        log.debug(f"访问 IntegerLiteral: {node.value}")
-        return node.value
-
-    def visit_FloatLiteral(self, node):
-        log.debug(f"访问 FloatLiteral: {node.value}")
-        return node.value
-
-    def visit_StringLiteral(self, node):
-        log.debug(f"访问 StringLiteral: {repr(node.value)}")
-        return repr(node.value)  # 返回带引号的字符串表示
-
-    def visit_CharLiteral(self, node):
-        log.debug(f"访问 CharLiteral: {repr(node.value)}")
-        return repr(node.value)  # 返回带引号的字符表示
-
-    def visit_BooleanLiteral(self, node):  # 新增
-        log.debug(f"访问 BooleanLiteral: {node.value}")
-        return 1 if node.value else 0  # C++ 中 bool 通常用 1/0
-
-    def visit_NullPtrLiteral(self, node):  # 新增
-        log.debug("访问 NullPtrLiteral")
-        return 0  # nullptr 通常表示为地址 0
-
     def visit_BinaryOp(self, node):
         op = node.op
         log.debug(f"访问 BinaryOp: {op} (L {node.left}, R {node.right})")
@@ -369,16 +352,11 @@ class TACGenerator:
                 else:
                     log.error(f"赋值运算符 '=' 的右侧表达式未生成有效地址。")
                 return None  # 赋值语句不返回值地址 (C中会返回，但TAC中通常不直接用)
-            # TODO: 处理更复杂的左值，例如 a[i] = x 或 p->m = x
             elif isinstance(node.left, (ArraySubscript, MemberAccess)):
                 # 访问左侧以获取其“地址”表示（可能是一个计算结果）
                 lvalue_addr_components = self.visit_lvalue(node.left)  # 需要一个专门的 lvalue 访问方法
                 rhs_addr = self.visit(node.right)
                 if lvalue_addr_components and rhs_addr is not None:
-                    #  ('STORE', base_addr, offset_or_index, value_to_store)
-                    # 或者 ('=[]', array_name, index_expr, value_to_store)
-                    # 或者 ('.=', obj_addr, member_offset_or_name, value_to_store)
-                    # 这里简化，具体取决于您的TAC指令集
                     base, index_or_member = lvalue_addr_components
                     if isinstance(node.left, ArraySubscript):
                         self._emit('=[]', base, index_or_member, rhs_addr)
@@ -405,12 +383,6 @@ class TACGenerator:
                 return None
 
             base_op = op[:-1]
-            # temp_addr = self._new_temp() # 中间结果
-            # self._emit(base_op, temp_addr, lhs_addr, rhs_addr) # _t = lhs base_op rhs
-            # self._emit('=', lhs_addr, temp_addr)            # lhs = _t
-            # 更直接的复合赋值指令 (如果解释器支持)
-            # self._emit(op, lhs_addr, lhs_addr, rhs_addr) # 或者目标是 lhs
-            # 或者分解为 op 和 =
             self._emit(base_op, lhs_addr, lhs_addr, rhs_addr)  # x = x + y (如果指令可以直接修改第一个操作数)
             # 或者用临时变量: t = x+y; x=t
             return lhs_addr  # 复合赋值表达式的值是赋回后的值
@@ -437,9 +409,7 @@ class TACGenerator:
             # 一元 '+' 通常无操作，可以优化掉
             if op == '+':
                 return operand_addr  # 直接返回操作数地址
-            # 对于 & 和 *，可能需要特定的指令或表示
-            # e.g., ('ADDR', dest, operand_addr) for &
-            # e.g., ('LOAD', dest, operand_addr) for *
+
             self._emit(op, dest_addr, operand_addr)
         elif op in ['p++', 'p--']:  # 后缀
             # 语义: t = x; x = x +/- 1; return t;
@@ -465,11 +435,6 @@ class TACGenerator:
                 # LVALUE of operand_addr = operand_addr +/- 1; dest_addr = LVALUE of operand_addr
             return dest_addr  # 返回新值
         elif op == 'sizeof':
-            # sizeof 的操作数可能是类型或表达式
-            # TAC 中通常直接计算出大小或用一个占位符表示
-            # self._emit('SIZEOF', dest_addr, operand_addr) # operand_addr 可能是类型字符串
-            # 简化：假设sizeof的结果是一个编译时已知或运行时可获取的整数
-            # 这里我们不直接计算，让解释器处理。operand_addr是表达式的结果或类型名
             self._emit('sizeof', dest_addr, operand_addr)
 
         else:
@@ -494,7 +459,6 @@ class TACGenerator:
             func_name = node.function.name
             result_addr = self._new_temp()  # 假设所有函数都有返回值的地方
             self._emit('CALL', result_addr, func_name, len(node.args))
-            # 后续可以根据函数是否void来决定是否使用 result_addr
             return result_addr
         else:
             # 函数指针调用
@@ -503,7 +467,6 @@ class TACGenerator:
                 log.error("函数指针表达式未能生成有效地址。")
                 return None
             result_addr = self._new_temp()
-            # ('CALL_PTR', result_temp, func_ptr_addr, num_args)
             self._emit('CALL_PTR', result_addr, func_ptr_addr, len(node.args))
             return result_addr
 
@@ -567,16 +530,16 @@ class TACGenerator:
             array_addr = self.visit(node.array_expression)  # 通常是数组名或指针
             index_addr = self.visit(node.index_expression)
             if array_addr is not None and index_addr is not None:
-                return (array_addr, index_addr)
+                return array_addr, index_addr
         elif isinstance(node, MemberAccess):
             log.debug("访问左值 MemberAccess")
             obj_addr = self.visit(node.object_or_pointer_expression)
             member_name = node.member_identifier.name  # 直接用成员名
             if obj_addr is not None:
-                return (obj_addr, member_name)
+                return obj_addr, member_name
         elif isinstance(node, Identifier):  # 简单标识符也是左值
             log.debug(f"访问左值 Identifier: {node.name}")
-            return (node.name, None)  # (base, no_offset_or_index)
+            return node.name, None
         else:
             log.error(f"节点类型 {type(node).__name__} 不是预期的左值类型。")
         return None
