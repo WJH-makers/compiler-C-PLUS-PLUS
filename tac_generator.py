@@ -19,39 +19,6 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(lineno)
 log = logging.getLogger(__name__)
 
 
-def visit_NullPtrLiteral(node):  # 新增
-    log.debug("访问 NullPtrLiteral")
-    return 0  # nullptr 通常表示为地址 0
-
-
-def visit_BooleanLiteral(node):  # 新增
-    log.debug(f"访问 BooleanLiteral: {node.value}")
-    return 1 if node.value else 0  # C++ 中 bool 通常用 1/0
-
-
-def visit_CharLiteral(node):
-    log.debug(f"访问 CharLiteral: {repr(node.value)}")
-    return repr(node.value)  # 返回带引号的字符表示
-
-
-def visit_StringLiteral(node):
-    log.debug(f"访问 StringLiteral: {repr(node.value)}")
-    return repr(node.value)  # 返回带引号的字符串表示
-
-
-def visit_FloatLiteral(node):
-    log.debug(f"访问 FloatLiteral: {node.value}")
-    return node.value
-
-
-def visit_IntegerLiteral(node):
-    log.debug(f"访问 IntegerLiteral: {node.value}")
-    return node.value
-
-
-def visit_Identifier(node):
-    log.debug(f"访问 Identifier: {node.name}")
-    return node.name
 
 
 class TACGenerator:
@@ -570,6 +537,34 @@ class TACGenerator:
         op_fetch = '->' if node.is_pointer_access else '.'
         self._emit(op_fetch, dest_addr, obj_addr, member_name)  # 取值指令
         return dest_addr
+
+    def visit_NullPtrLiteral(self, node):  # 新增
+        log.debug("访问 NullPtrLiteral")
+        return 0  # nullptr 通常表示为地址 0
+
+    def visit_BooleanLiteral(self, node):  # 新增
+        log.debug(f"访问 BooleanLiteral: {node.value}")
+        return 1 if node.value else 0  # C++ 中 bool 通常用 1/0
+
+    def visit_CharLiteral(self, node):
+        log.debug(f"访问 CharLiteral: {repr(node.value)}")
+        return repr(node.value)  # 返回带引号的字符表示
+
+    def visit_StringLiteral(self, node):
+        log.debug(f"访问 StringLiteral: {repr(node.value)}")
+        return repr(node.value)  # 返回带引号的字符串表示
+
+    def visit_FloatLiteral(self, node):
+        log.debug(f"访问 FloatLiteral: {node.value}")
+        return node.value
+
+    def visit_IntegerLiteral(self, node):
+        log.debug(f"访问 IntegerLiteral: {node.value}")
+        return node.value
+
+    def visit_Identifier(self, node):
+        log.debug(f"访问 Identifier: {node.name}")
+        return node.name
 
 
 if __name__ == "__main__":
