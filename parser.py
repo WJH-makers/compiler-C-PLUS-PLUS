@@ -2,116 +2,115 @@
 import logging
 import sys
 
+# --- 日志设置 ---
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# logging.basicConfig(level=logging.DEBUG, format='%(levelname)s (%(filename)s:%(lineno)d): %(message)s')
 
+# --- 导入依赖与占位符 ---
 try:
-    from compiler_ast import *
+    # Ensure these are correctly defined in compiler_ast.py
+    from compiler_ast import (
+        ASTNode, Program, FunctionDefinition, Parameter, CompoundStatement,
+        DeclarationStatement, AssignmentStatement, ExpressionStatement,
+        IfStatement, WhileStatement, ForStatement, DoWhileStatement,
+        BreakStatement, ContinueStatement, ReturnStatement, Identifier,
+        IntegerLiteral, FloatLiteral, StringLiteral, CharLiteral,
+        BinaryOp, UnaryOp, CallExpression, ArraySubscript, MemberAccess,
+        CastExpression, BooleanLiteral, NullPtrLiteral, TernaryOp  # Ensure defined
+    )
+    # Ensure lexer.py with corrected comma classification is used
     from lexer import LexerError, Lexer
 except ImportError as e:
     print(f"错误：无法导入所需的模块 (compiler_ast, lexer)。请确保它们存在且路径正确。\n{e}", file=sys.stderr)
     sys.exit(1)
 
-# C++ 开头关键字
+# Placeholders (Remove if defined in compiler_ast.py)
+try:
+    BooleanLiteral
+except NameError:
+    class BooleanLiteral(ASTNode):
+        def __init__(self, value, line=None, column=None): super().__init__(line, column); self.value = value
+
+        def __repr__(self): return f"BooleanLiteral(value={self.value})"
+try:
+    NullPtrLiteral
+except NameError:
+    class NullPtrLiteral(ASTNode):
+        def __init__(self, line=None, column=None): super().__init__(line, column)
+
+        def __repr__(self): return "NullPtrLiteral"
+try:
+    TernaryOp
+except NameError:
+    class TernaryOp(ASTNode):
+        def __init__(self, condition, true_expression, false_expression, line=None, column=None): super().__init__(line,
+                                                                                                                   column); self.condition = condition; self.true_expression = true_expression; self.false_expression = false_expression
+
+        def __repr__(
+                self): return f"TernaryOp(cond={self.condition}, then={self.true_expression}, else={self.false_expression})"
+# --- 占位符结束 ---
+
 cpp_declaration_starters = [
-    "alignas",  # 用于指定对齐要求，可以放在声明的最前面
-    "auto",  # 用于类型推导或自动存储期
-    "bool",  # 基本类型
-    "char",  # 基本类型
-    "class",  # 用户定义类型
-    "const",  # 类型限定符，可以放在类型前面
-    "consteval",  # C++20，函数或变量必须在编译期求值
-    "constexpr",  # C++11，编译期常量
-    "constinit",  # C++20，静态初始化
-    "decltype",  # C++11，类型推导
-    "double",  # 基本类型
-    "enum",  # 用户定义类型
-    "extern",  # 外部链接
-    "float",  # 基本类型
-    "int",  # 基本类型
-    "long",  # 基本类型修饰符
-    "register",  # 存储类说明符（基本废弃）
-    "restrict",  # C++11 (来自 C99)，用于指针别名分析
-    "short",  # 基本类型修饰符
-    "signed",  # 基本类型修饰符
-    "static",  # 静态存储期或内部链接
-    "static_assert",  # C++11，静态断言声明
-    "struct",  # 用户定义类型
-    "thread_local",  # C++11，线程局部存储期
-    "typedef",  # 定义类型别名
-    "union",  # 用户定义类型
-    "unsigned",  # 基本类型修饰符
-    "using",  # C++11，用于类型别名或引入声明
-    "void",  # 基本类型（常用于函数返回类型或无类型指针）
-    "volatile",  # 类型限定符
-    "wchar_t",  # 基本类型
+    "alignas", "auto", "bool", "char", "class", "const", "consteval",
+    "constexpr", "constinit", "decltype", "double", "enum", "extern",
+    "float", "int", "long", "register", "restrict", "short", "signed",
+    "static", "static_assert", "struct", "thread_local", "typedef",
+    "union", "unsigned", "using", "void", "volatile", "wchar_t", "string"
 ]
 
 
 class ParseError(Exception):
-    """用于解析错误的自定义异常。"""
-
     def __init__(self, message, token):
         location = f"L{token.original_line}:C{token.column}" if token and hasattr(token,
                                                                                   'original_line') and token.original_line is not None else "UnknownLocation/EOF"
-        token_repr = repr(token.value) if token and hasattr(token, 'value') else 'EOF'
-        super().__init__(f"Parse Error at {location}: {message} (found {token_repr})")
+        token_repr = repr(token.value) if token and hasattr(token, 'value') else (
+            'EOF' if token is None else repr(token))
+        token_type_info = f" ({token.type})" if token and hasattr(token, 'type') else ""
+        super().__init__(f"Parse Error at {location}: {message} (found {token_repr}{token_type_info})")
         self.token = token
 
 
 class Parser:
-    """
-    语法分析器类，负责将 Token 流转换为抽象语法树 (AST)。
-    使用 Precedence Climbing (优先级爬升) 方法解析表达式。
-    """
-
     def __init__(self, tokens):
         self.token_iter = iter(tokens)
         self.current_token = None
         self.peek_token = None
+        self._last_consumed_token_for_error = None
         self._advance()
         self._advance()
+        self.std_namespace_is_active = False
 
+    # --- Token 处理辅助方法 ---
     def _advance(self):
-        """将 Token 流向前推进一个位置。"""
+        self._last_consumed_token_for_error = self.current_token
         self.current_token = self.peek_token
         try:
             self.peek_token = next(self.token_iter)
         except StopIteration:
             self.peek_token = None
+        logging.debug(
+            f"[_advance] Consumed: {self._last_consumed_token_for_error}, Current: {self.current_token}, Peek: {self.peek_token}")
 
     def _error(self, message, token=None):
-        """报告解析错误并抛出异常。"""
-        error_token = token or self.current_token
-        if error_token is None:
-            raise ParseError(message + " (at end of input)", None)
-        if not hasattr(error_token, 'original_line') or error_token.original_line is None:
-            pass
+        error_token = token or self.current_token or self._last_consumed_token_for_error
         raise ParseError(message, error_token)
 
     def _check(self, token_type, value=None):
-        """检查当前 Token 是否匹配指定的类型和（可选的）值。"""
-        if not self.current_token or self.current_token.type == "EOF":
-            return False
-        type_match = self.current_token.type == token_type
-        value_match = (value is None or self.current_token.value == value)
-        return type_match and value_match
+        if not self.current_token or self.current_token.type == "EOF": return False
+        return self.current_token.type == token_type and (value is None or self.current_token.value == value)
 
     def _check_peek(self, token_type, value=None):
-        """检查下一个 Token 是否匹配指定的类型和（可选的）值。"""
-        if not self.peek_token or self.peek_token.type == "EOF":
-            return False
-        return self.peek_token.type == token_type and \
-            (value is None or self.peek_token.value == value)
+        if not self.peek_token or self.peek_token.type == "EOF": return False
+        return self.peek_token.type == token_type and (value is None or self.peek_token.value == value)
 
     def _match(self, token_type, value=None):
-        """如果当前 Token 匹配，则消耗它（前进）并返回 True，否则返回 False。"""
         if self._check(token_type, value):
-            self._advance()
+            logging.debug(f"[_match] Matched and consuming: {self.current_token}")
+            self._advance();
             return True
         return False
 
     def _consume(self, token_type, error_msg, value=None):
-        """期望当前 Token 匹配，消耗它，并返回被消耗的 Token。如果不匹配则引发 ParseError。"""
         consumed_token = self.current_token
         if not self._check(token_type, value):
             expected = f"'{value}' ({token_type})" if value else token_type
@@ -119,1069 +118,981 @@ class Parser:
             found_val = repr(self.current_token.value) if self.current_token else "EOF"
             self._error(f"{error_msg}. Expected {expected}, but found {found_val} ({found_type})",
                         token=self.current_token or consumed_token)
-        self._advance()
+        logging.debug(f"[_consume] Consuming: {consumed_token}")
+        self._advance();
         return consumed_token
 
-    # 运算符优先级和结合性定义 数值越大表示优先级越高
-    PRECEDENCE = {
-        '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1, '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1,
-        '?': 2,
-        '||': 3, '&&': 4, '|': 5, '^': 6, '&': 7,
-        '==': 8, '!=': 8, '<': 9, '>': 9, '<=': 9, '>=': 9,
-        '<<': 10, '>>': 10, '+': 11, '-': 11, '*': 12, '/': 12, '%': 12,
-    }
-    """
-    算术运算符 (*, /, +, -)：操作数值，进行基本的数学计算。优先级较高，因为它们通常是计算值的基础。
-    位运算符 (<<, >>, &, |, ^)：操作数据的二进制位。优先级通常低于算术运算符，因为它们是在位层面进行操作，结果再被用于更高级的计算或比较。
-    关系运算符 (<, >, <=, >=) 和相等性运算符 (==, !=)：比较数值或位运算的结果，产生布尔值（真或假）。它们的优先级低于算术和位运算符，因为比较是基于计算结果进行的。关系运算符通常比相等性运算符优先级高一点。
-    逻辑运算符 (&&, ||)：操作布尔值，进行逻辑判断。它们的优先级低于关系运算符，因为逻辑判断的对象通常是比较的结果。&& 的优先级高于 ||，这类似于算术中乘法高于加法，可以让 A && B || C && D 这样的表达式读起来像 (A && B) || (C && D)，符合逻辑上的结合习惯（“与”比“或”结合更紧）。
-    条件运算符 (? :)：根据一个布尔条件选择两个表达式中的一个。它的优先级低于逻辑运算符，因为它操作的对象（条件）通常是逻辑运算的结果。
-    赋值运算符 (=, +=, -=, 等)：将右侧表达式计算的值赋给左侧的变量。这是整个表达式或语句的最终目的之一，通常在所有其他计算（包括算术、逻辑、条件判断等）都完成之后才执行。因此，赋值运算符的优先级是最低的。
-    """
+    # --- 运算符优先级与类型检查 (同上) ---
+    PRECEDENCE = {'=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1, '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1,
+                  '?': 2, '||': 3, '&&': 4, '|': 5, '^': 6, '&': 7, '==': 8, '!=': 8, '<': 9, '>': 9, '<=': 9, '>=': 9,
+                  '<<': 10, '>>': 10, '+': 11, '-': 11, '*': 12, '/': 12, '%': 12, }
     RIGHT_ASSOC = {'=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '?'}
 
-    # --- 主要解析方法 ---
     def _check_type_start(self):
-        """检查当前 Token 是否可以开始一个 C++ 类型说明符 (包括 string)。"""
-        if not self.current_token or self.current_token.type == "EOF":
-            return False
-        if self.current_token.type == "KEYWORD" and self.current_token.value in cpp_declaration_starters:
-            return True
-        # TODO: Handle custom type names (typedefs, class/struct names) - requires symbol table access during parsing? Or mark as IDENTIFIER and check later?
+        logging.debug(f"[_check_type_start] Current token: {self.current_token}")
+        if not self.current_token or self.current_token.type == "EOF": return False
+        if self.current_token.type == "KEYWORD" and self.current_token.value in cpp_declaration_starters: return True
+        if self.current_token.type == "IDENTIFIER" and self.current_token.value == "std" and self._check_peek(
+                "OPERATOR", "::"): return True
+        logging.debug(f"[_check_type_start] Result: False (Token '{self.current_token}' not a type start)")
         return False
 
     def _parse_type(self):
-        """解析基本类型说明符序列 (e.g., 'const unsigned long int')。"""
-        type_token = self.current_token
-        if not self._check_type_start():
-            self._error("Expected type specifier keyword (int, char, float, const, string, etc.)", token=type_token)
-            return None
+        type_token_start = self.current_token;
+        logging.debug(f"[_parse_type] Starting with token: {type_token_start}");
         type_parts = []
-        # Keep consuming type-related keywords
-        while self.current_token and self._check_type_start():
-            type_parts.append(self.current_token.value)
+        if self.current_token and self.current_token.type == "IDENTIFIER" and self.current_token.value == "std" and self.peek_token and self.peek_token.type == "OPERATOR" and self.peek_token.value == "::":
+            std_token_val = self.current_token.value;
+            self._advance();
+            colon_token_val = self.current_token.value;
             self._advance()
-
-        if not type_parts:  # Should not happen if initial check passed
-            self._error("Internal Parser Error: Failed to parse type specifier parts", token=type_token)
-            return None
-
-        parsed_type = " ".join(type_parts)
-        logging.debug(f"Parsed type specifier: {parsed_type}")
+            if self.current_token and self.current_token.type == "KEYWORD" and self.current_token.value in cpp_declaration_starters:
+                type_parts.extend(
+                    [std_token_val, colon_token_val, self.current_token.value]);
+                self._advance();
+                logging.debug(
+                    f"[_parse_type] Parsed qualified type part: {''.join(type_parts)}")
+            else:
+                self._error(f"Expected known type keyword after 'std::', found {self.current_token}",
+                            token=self.current_token);
+                return None
+        while self.current_token and self._check_type_start():
+            if self.current_token.value == "std" and type_parts and type_parts[0] == "std": break
+            logging.debug(f"[_parse_type] Adding part: {self.current_token.value}");
+            type_parts.append(self.current_token.value);
+            self._advance()
+        if not type_parts: self._error("Expected type specifier keyword", token=type_token_start); return None
+        parsed_type = " ".join(type_parts);
+        if "::" in parsed_type: parsed_type = parsed_type.replace(" :: ", "::")
+        logging.debug(f"[_parse_type] Parsed final type: '{parsed_type}'");
         return parsed_type
 
+    # --- 顶层解析与错误恢复 (同上) ---
     def parse_program(self):
-        """解析整个程序（外部声明序列）。"""
-        prog_start_token = self.current_token
-        declarations = []
-        parse_count = 0
-        max_parse_attempts = 1000
-
+        prog_start_token = self.current_token;
+        declarations = [];
+        parse_count = 0;
+        max_parse_attempts = 1000;
+        self.std_namespace_is_active = False
         while self.current_token and self.current_token.type != "EOF" and parse_count < max_parse_attempts:
-            start_while_token = self.current_token
-            parse_count += 1
-            logging.debug(f"Top-level parse loop iteration {parse_count}, current token: {self.current_token}")
-
+            start_while_token = self.current_token;
+            parse_count += 1;
+            logging.debug(
+                f"[parse_program] Iteration {parse_count}, current: {self.current_token}, std_active: {self.std_namespace_is_active}")
             try:
-                # Handle 'using namespace ... ;'
                 if self._check('KEYWORD', 'using') and self._check_peek('KEYWORD', 'namespace'):
-                    logging.debug("Found 'using namespace' directive.")
-                    self._advance()  # using
-                    self._advance()  # namespace
-                    ns_token = self._consume('IDENTIFIER', "Expected identifier after 'using namespace'")
-                    self._consume('PUNCTUATOR', "Expected ';' after 'using namespace' directive", value=';')
-                    logging.info(f"Skipped 'using namespace {ns_token.value};'")
+                    logging.debug("[parse_program] Found 'using namespace'.");
+                    self._advance();
+                    self._advance()
+                    ns_token = self._consume('IDENTIFIER', "Expected identifier after 'using namespace'");
+                    self._consume('PUNCTUATOR', "Expected ';' after 'using namespace'", value=';')
+                    if ns_token.value == 'std':
+                        self.std_namespace_is_active = True;
+                        logging.info(
+                            f"[parse_program] 'using namespace std;' processed. Flag set.")
+                    else:
+                        logging.info(f"[parse_program] 'using namespace {ns_token.value};' (non-std) processed.")
                     continue
-                # Handle external declarations (functions or global variables)
                 elif self._check_type_start():
-                    logging.debug("Found start of an external declaration (type detected).")
+                    logging.debug("[parse_program] Type start detected.");
                     decl = self._parse_external_declaration()
-                    if decl:
-                        declarations.append(decl)
-                    continue
-
+                    if decl: declarations.append(decl)
+                    if self.current_token == start_while_token and decl is None: logging.warning(
+                        f"[parse_program] _parse_external_declaration returned None but token did not advance. Current: {self.current_token}.")
                 elif self._match('PUNCTUATOR', ';'):
-                    logging.info("Ignoring empty top-level statement (stray semicolon).")
+                    logging.info("[parse_program] Empty top-level statement ignored.");
                     continue
                 else:
-                    self._error(
-                        f"Unexpected token at top level. Expected type specifier (int, void, etc.), 'using', or ';'")
-
+                    self._error(f"Unexpected token at top level. Expected type specifier, 'using', or ';'")
             except ParseError as e:
-                print(e, file=sys.stderr)
-                if self.current_token == start_while_token and (
-                        self.current_token and self.current_token.type != "EOF"):
-                    logging.warning(f"Parser seems stuck on token {self.current_token}. Forcing advance.")
-                    self._advance()
-                    # Check if forced advance led to EOF
-                    if not self.current_token or self.current_token.type == "EOF":
-                        logging.info("EOF reached after forced advance.")
-                        break  # Exit loop if EOF reached
-
-                logging.info("Attempting recovery by synchronizing...")
-                self._synchronize()
-                if not self.current_token or self.current_token.type == "EOF":
-                    logging.info("EOF reached after synchronization.")
-                    break
-                logging.info(f"Resynchronized at token: {self.current_token}. Continuing parse.")
-
-        if parse_count >= max_parse_attempts:
-            logging.error(
-                f"Parser stopped after reaching maximum iterations ({max_parse_attempts}), potentially stuck in a loop.")
-
-        # Determine program node location based on the first token encountered
-        line = prog_start_token.original_line if prog_start_token else 1
+                logging.error(f"[parse_program] ParseError: {e}")
+                if self.current_token == start_while_token and self.current_token and self.current_token.type != "EOF": logging.warning(
+                    f"[parse_program] Parser stuck on {self.current_token} after error. Forcing advance."); self._advance();
+                if not self.current_token or self.current_token.type == "EOF": break
+                logging.info("[parse_program] Attempting synchronization...");
+                self._synchronize(context='top_level')
+                if not self.current_token or self.current_token.type == "EOF": break
+                logging.info(f"[parse_program] Resynchronized at {self.current_token}.")
+            if self.current_token == start_while_token and self.current_token.type != "EOF": logging.critical(
+                f"[parse_program] Parser did not advance. Stuck on {self.current_token}. Breaking."); self._advance(); break
+        if parse_count >= max_parse_attempts: logging.error(
+            f"[parse_program] Max parse attempts ({max_parse_attempts}) reached.")
+        line = prog_start_token.original_line if prog_start_token else 1;
         col = prog_start_token.column if prog_start_token else 1
         return Program(declarations, line=line, column=col)
 
-    def _synchronize(self):
-        """尝试基本的错误恢复：跳过 token 直到找到一个合适同步点。"""
-        skipped_tokens_log = []
-        # Tokens that might indicate the start of a new top-level declaration or statement
-        sync_keywords = {'if', 'while', 'for', 'do', 'return', 'switch', 'void', 'char', 'int', 'long', 'float',
-                         'double', 'const', 'struct', 'class', 'using'}
-        sync_punctuators = {';', '}'}  # Semicolon often ends declarations/statements, '}' ends blocks
-
+    def _synchronize(self, context='unknown'):
+        skipped_tokens_log = [];
+        logging.debug(f"[_synchronize] Entering synchronization (context: {context}). Current: {self.current_token}")
+        phrase_terminators = {';', '}'};
+        next_phrase_starters = {'{', 'if', 'while', 'for', 'do', 'return', 'switch', 'case', 'default', 'break',
+                                'continue', 'goto', 'try', 'catch', 'throw', 'void', 'char', 'int', 'long', 'float',
+                                'double', 'const', 'static', 'extern', 'struct', 'class', 'enum', 'union', 'typedef',
+                                'using', 'namespace', 'template', 'public', 'private', 'protected', 'string'}
         while self.current_token and self.current_token.type != "EOF":
-            token = self.current_token
-            # Log skipped token concisely
-            token_str = f"<{token.type},{repr(token.value)}>"
-            skipped_tokens_log.append(token_str)
-
-            # Synchronization points:
-            # 1. Semicolon (often ends declarations or statements)
-            if token.type == 'PUNCTUATOR' and token.value == ';':
-                self._advance()  # Consume the semicolon itself
-                logging.info(f"Sync: Resynchronized after ';'. Skipped: {' '.join(skipped_tokens_log)}")
+            token = self.current_token;
+            token_str = f"<{token.type},{repr(token.value)} L{token.original_line}C{token.column}>"
+            if token.type == 'PUNCTUATOR' and token.value in phrase_terminators:
+                skipped_tokens_log.append(token_str)
+                if token.value == ';':
+                    self._advance();
+                    logging.info(
+                        f"[_synchronize] Recovered by consuming until ';'. Skipped: {' '.join(skipped_tokens_log)}")
+                else:
+                    logging.info(
+                        f"[_synchronize] Recovered by finding '}}'. Will resume before it. Skipped: {' '.join(skipped_tokens_log)}")
                 return
-            # 2. Closing brace (likely ends a function/block, might be start of next global item)
-            if token.type == 'PUNCTUATOR' and token.value == '}':
-                # Don't consume the '}', let the outer loop handle it if it's expected
-                logging.info(f"Sync: Resynchronized before '}}'. Skipped: {' '.join(skipped_tokens_log)}")
-                return
-            # 3. Start of a type specifier (likely start of new declaration/function)
-            if self._check_type_start():
-                logging.info(
-                    f"Sync: Resynchronized before type '{token.value}'. Skipped: {' '.join(skipped_tokens_log)}")
-                return
-            # 4. Common statement keywords
-            if token.type == 'KEYWORD' and token.value in sync_keywords:
-                logging.info(
-                    f"Sync: Resynchronized before keyword '{token.value}'. Skipped: {' '.join(skipped_tokens_log)}")
-                return
-
-            # If not a sync point, advance
+            if self._check_type_start(): logging.info(
+                f"[_synchronize] Resuming before potential type '{token.value}'. Skipped: {' '.join(skipped_tokens_log)}"); return
+            if token.type == 'KEYWORD' and token.value in next_phrase_starters: logging.info(
+                f"[_synchronize] Resuming before keyword '{token.value}'. Skipped: {' '.join(skipped_tokens_log)}"); return
+            if token.type == 'PUNCTUATOR' and token.value == '{': logging.info(
+                f"[_synchronize] Resuming before '{{'. Skipped: {' '.join(skipped_tokens_log)}"); return
+            skipped_tokens_log.append(token_str);
+            logging.debug(f"[_synchronize] Skipping token: {token}");
             self._advance()
+        logging.info(f"[_synchronize] Reached EOF while synchronizing. Skipped: {' '.join(skipped_tokens_log)}")
 
-        logging.info(f"Sync: Reached EOF while synchronizing. Skipped: {' '.join(skipped_tokens_log)}")
-
+    # --- 函数与变量声明解析 ---
     def _parse_external_declaration(self):
-        """解析全局变量或函数定义/原型。假定当前 token 是类型开始。"""
-        start_token = self.current_token
-        decl_type = self._parse_type()  # Consumes type keywords
-        pointer_level = 0
-        # Parse potential pointer stars '*'
-        while self._match('OPERATOR', '*'):
-            pointer_level += 1
-        full_type_str = decl_type + '*' * pointer_level
-
-        # Expect an identifier (variable or function name)
+        # (与上一版本相同)
+        start_token = self.current_token;
+        logging.debug(f"[_parse_external_declaration] Starting. Current token: {start_token}")
+        decl_type = self._parse_type();
+        if decl_type is None: return None
+        pointer_level = 0;
+        while self._match('OPERATOR', '*'): pointer_level += 1
+        full_type_str = decl_type + '*' * pointer_level;
+        logging.debug(f"[_parse_external_declaration] Parsed full type: '{full_type_str}'")
+        if not self._check('IDENTIFIER'): self._error(
+            f"Expected identifier after type specifier '{full_type_str}', but found {self.current_token}",
+            token=self.current_token); return None
         name_token = self._consume('IDENTIFIER', "Expected identifier after type specifier")
-        name_identifier = Identifier(name_token.value, line=name_token.original_line, column=name_token.column)
-
-        start_line = start_token.original_line if start_token else None
-        start_col = start_token.column if start_token else None
-
-        # Check if it's a function (prototype or definition) or a variable
-        if self._check('PUNCTUATOR', '('):  # Function-like syntax
+        name_identifier = Identifier(name_token.value, line=name_token.original_line, column=name_token.column);
+        logging.debug(
+            f"[_parse_external_declaration] Parsed identifier: '{name_identifier.name}'. Next token: {self.current_token}")
+        line_info = start_token or name_token;
+        start_line = line_info.original_line if line_info else None;
+        start_col = line_info.column if line_info else None
+        if self._check('PUNCTUATOR', '('):
+            logging.debug(
+                f"[_parse_external_declaration] Found '(', parsing as function for '{name_identifier.name}'.");
             self._advance()  # Consume '('
-            params = self._parse_parameter_list()
-            self._consume('PUNCTUATOR', "Expected ')' after parameter list", value=')')
-
-            if self._check('PUNCTUATOR', '{'):  # Function Definition
-                logging.debug(f"Parsing function definition body for {name_identifier.name}")
+            params = self._parse_parameter_list()  # Use the REVISED parameter list parsing
+            # _parse_parameter_list now consumes the final ')' or errors
+            if self._check('PUNCTUATOR', '{'):
+                logging.debug(
+                    f"[_parse_external_declaration] Parsing function definition body for {name_identifier.name}");
                 body = self._parse_compound_statement()
                 return FunctionDefinition(full_type_str, name_identifier, params, body, line=start_line,
                                           column=start_col)
-            elif self._match('PUNCTUATOR', ';'):  # Function Prototype
-                logging.info(f"Parsed function prototype: {full_type_str} {name_identifier.name}(...)")
-                # Represent prototype as a DeclarationStatement with a flag
+            elif self._match('PUNCTUATOR', ';'):
+                logging.info(
+                    f"[_parse_external_declaration] Parsed function prototype: {full_type_str} {name_identifier.name}(...)")
                 decl_node = DeclarationStatement(full_type_str, name_identifier, None, line=start_line,
-                                                 column=start_col)
-                setattr(decl_node, 'is_prototype', True)
-                setattr(decl_node, 'prototype_params', params)  # Store parsed param info
+                                                 column=start_col);
+                setattr(decl_node, 'is_prototype', True);
+                setattr(decl_node, 'prototype_params', params)
                 return decl_node
             else:
-                self._error("Expected '{' to start function body or ';' for prototype after parameters")
-                return None  # Should not be reached
-
-        else:  # Global Variable Declaration
+                self._error("Expected '{' for function body or ';' for prototype after parameter list ')'");
+                return None
+        else:
+            logging.debug(
+                f"[_parse_external_declaration] Did not find '(', parsing as variable for '{name_identifier.name}'.");
             initializer = None
-            if self._match('OPERATOR', '='):
-                initializer = self._parse_assignment_expression()  # Use appropriate precedence
-            # Array declaration syntax T var[size]; would be handled here too if implemented
-            # TODO: Add array declaration parsing logic if needed
+            if self._match('OPERATOR', '='): initializer = self._parse_assignment_expression()
             self._consume('PUNCTUATOR', "Expected ';' after global variable declaration", value=';')
             decl_node = DeclarationStatement(full_type_str, name_identifier, initializer, line=start_line,
-                                             column=start_col)
-            setattr(decl_node, 'is_prototype', False)  # Mark as not a prototype
+                                             column=start_col);
+            setattr(decl_node, 'is_prototype', False)
             return decl_node
 
-    def _parse_statement(self):
-        """解析单个语句。"""
-        loc_token = self.current_token
-        line = loc_token.original_line if loc_token else None
-        col = loc_token.column if loc_token else None
-
-        if self._check_type_start():
-            # It's a local declaration
-            return self._parse_declaration_statement()
-        elif self._check('PUNCTUATOR', '{'):
-            return self._parse_compound_statement()
-        elif self._match('KEYWORD', 'if'):
-            return self._parse_if_statement(line, col)
-        elif self._match('KEYWORD', 'while'):
-            return self._parse_while_statement(line, col)
-        elif self._match('KEYWORD', 'for'):
-            return self._parse_for_statement(line, col)
-        elif self._match('KEYWORD', 'do'):
-            return self._parse_do_while_statement(line, col)
-        elif self._match('KEYWORD', 'return'):
-            return self._parse_return_statement(line, col)
-        elif self._match('KEYWORD', 'break'):
-            self._consume('PUNCTUATOR', "Expected ';'", value=';')
-            return BreakStatement(line=line, column=col)
-        elif self._match('KEYWORD', 'continue'):
-            self._consume('PUNCTUATOR', "Expected ';'", value=';')
-            return ContinueStatement(line=line, column=col)
-        elif self._match('PUNCTUATOR', ';'):
-            # Empty statement
-            logging.debug("Parsed empty statement.")
-            return None  # Or a specific EmptyStatement node if preferred
-        else:  # Should be an expression statement
-            # Check for EOF or block end before trying to parse expression
-            if not self.current_token or self.current_token.type == 'EOF' or self._check('PUNCTUATOR', '}'):
-                if self._check('PUNCTUATOR', '}'):
-                    self._error("Expected statement or expression, but found '}'")
-                else:  # EOF
-                    self._error("Unexpected end of input, expected statement or expression")
-                return None  # Indicates error
-
-            # Parse the expression
-            expr = self._parse_expression()
-            if expr is None:
-                # Error should have been raised by _parse_expression
-                # Add a fallback error message if needed
-                self._error("Invalid expression found where statement expected", token=loc_token)
-                return None
-
-            # Expect a semicolon after the expression
-            self._consume('PUNCTUATOR', "Expected ';' after expression statement", value=';')
-            return ExpressionStatement(expr, line=line, column=col)
-
-    def _parse_compound_statement(self):
-        """解析语句块 {}。"""
+    # --- <<< 再次修正参数列表解析方法 >>> ---
+    def _parse_parameter_list(self):
+        """解析函数参数列表。假定 '(' 已被调用者消耗。"""
         start_token = self.current_token
-        start_line = start_token.original_line if start_token else None
+        logging.debug(f"[_parse_parameter_list] Starting. Current: {start_token}")
+        params = []
+
+        # 处理特殊情况: () 空列表
+        if self._check('PUNCTUATOR', ')'):
+            self._consume('PUNCTUATOR', "Expected ')' for empty parameter list", value=')')
+            logging.debug(f"[_parse_parameter_list] Parsed empty list '()'.")
+            return []
+
+        # 处理特殊情况: (void)
+        if self._check('KEYWORD', 'void') and self._check_peek('PUNCTUATOR', ')'):
+            self._advance()  # void
+            self._consume('PUNCTUATOR', "Expected ')' after 'void'", value=')')
+            logging.debug(f"[_parse_parameter_list] Parsed '(void)'.")
+            return []
+
+        # --- 解析参数循环 ---
+        while True:
+            if self._check('PUNCTUATOR', ')'):  # 如果遇到')',说明列表结束（或可能是错误后）
+                break
+
+            # 解析一个参数 (type [*] [name])
+            param_node = self._parse_parameter()
+            if param_node is None:
+                # _parse_parameter 应该已经报错并抛出异常
+                # 如果没有（例如未来修改导致返回None），这里需要处理
+                self._error("Failed to parse parameter", self.current_token or start_token)
+                # 尝试同步以继续查找可能的错误
+                self._synchronize(context='parameter_list')
+                continue  # 同步后尝试继续解析下一个参数或找到 ')'
+
+            params.append(param_node)
+            logging.debug(f"[_parse_parameter_list] Parsed one parameter: {param_node}")
+
+            # 查看参数后面是什么：逗号 or 右括号
+            if self._check('PUNCTUATOR', ','):
+                logging.debug(f"[_parse_parameter_list] Found comma, consuming and looking for next param or ...")
+                self._consume('PUNCTUATOR', "Expected ','", value=',')  # 消耗逗号
+
+                # 逗号后检查 '...'
+                if self._match('OPERATOR', '...'):
+                    logging.info("Parsed varargs '...'. Parameter list must end here.")
+                    params.append(Parameter("...", None, line=self._last_consumed_token_for_error.original_line,
+                                            column=self._last_consumed_token_for_error.column))
+                    if not self._check('PUNCTUATOR', ')'):
+                        # Varargs后面必须是')'
+                        self._error("Expected ')' after varargs '...'")
+                    break  # 结束循环，准备消耗 ')'
+
+                # 逗号后检查是否意外地是 ')' (拖尾逗号)
+                if self._check('PUNCTUATOR', ')'):
+                    self._error("Trailing comma not allowed in parameter list",
+                                token=self._last_consumed_token_for_error)  # 定位在逗号
+                    break
+                # 如果逗号后既不是 '...' 也不是 ')'，那么预期是下一个参数，继续循环
+                logging.debug(f"[_parse_parameter_list] Continuing loop after comma.")
+
+            elif self._check('PUNCTUATOR', ')'):
+                # 参数后直接是 ')'，列表正常结束
+                logging.debug(f"[_parse_parameter_list] Found ')' after parameter. Ending list.")
+                break
+            else:
+                # 参数后既不是 ',' 也不是 ')'，语法错误
+                self._error("Expected ',' or ')' after parameter", token=self.current_token)
+                break  # 停止解析
+
+        # --- 循环结束 ---
+        # 消耗最后的 ')'
+        self._consume('PUNCTUATOR', "Expected ')' to end parameter list", value=')')
+        logging.debug(f"[_parse_parameter_list] Parsed parameters successfully: {params}")
+        return params
+
+    # --- <<< _parse_parameter 保持不变 (只解析类型和可选名字) >>> ---
+    def _parse_parameter(self):
+        """解析单个参数 (type [*] [name])。"""
+        start_token = self.current_token
+        logging.debug(f"[_parse_parameter] Starting. Current token: {start_token}")
+        param_type_str = self._parse_type()
+        if param_type_str is None: return None
+
+        pointer_level = 0
+        while self._match('OPERATOR', '*'): pointer_level += 1
+        full_param_type = param_type_str + '*' * pointer_level
+
+        name_id = None
+        if self._check('IDENTIFIER'):
+            name_token = self._consume('IDENTIFIER', "Expected parameter name")
+            name_id = Identifier(name_token.value, line=name_token.original_line, column=name_token.column)
+            logging.debug(f"[_parse_parameter] Parsed parameter name: {name_id.name}")
+        else:
+            logging.debug(f"[_parse_parameter] Parsed nameless parameter of type '{full_param_type}'.")
+
+        line = start_token.original_line if start_token else None
+        col = start_token.column if start_token else None
+        return Parameter(full_param_type, name_id, line=line, column=col)
+
+    # --- <<< 再次修正函数调用参数列表解析 >>> ---
+    def _parse_argument_list(self):
+        """解析函数调用参数列表。假定 '(' 已被消耗。"""
+        start_token = self.current_token
+        logging.debug(f"[_parse_argument_list] Starting. Current: {start_token}")
+        args = []
+
+        # 处理空参数列表 ()
+        if self._check('PUNCTUATOR', ')'):
+            # 由调用者 (_parse_postfix_expression) 消耗 ')'
+            logging.debug("[_parse_argument_list] Parsed empty argument list '()'.")
+            return args
+
+        # 解析一个或多个参数
+        while True:
+            # 解析一个参数表达式 (赋值表达式)
+            logging.debug(f"[_parse_argument_list] Parsing argument expression. Current: {self.current_token}")
+            arg_expr = self._parse_assignment_expression()
+            if arg_expr is None:
+                # 通常意味着语法错误
+                self._error("Failed to parse function argument expression", self.current_token or start_token)
+                return []  # 或抛出
+
+            args.append(arg_expr)
+            logging.debug(f"[_parse_argument_list] Parsed one argument: {arg_expr}. Next token: {self.current_token}")
+
+            # 检查参数后面是逗号还是右括号
+            if self._check('PUNCTUATOR', ','):
+                # 找到逗号，消耗它，准备解析下一个参数
+                self._consume('PUNCTUATOR', "Expected ','", value=',')  # 消耗逗号
+                logging.debug(
+                    f"[_parse_argument_list] Consumed comma. Looking for next argument or ')'. Current: {self.current_token}")
+                # 检查是否是拖尾逗号 (后面直接是 ')')
+                if self._check('PUNCTUATOR', ')'):
+                    self._error("Unexpected ')' after comma in argument list (trailing comma)",
+                                self._last_consumed_token_for_error)  # Error at comma
+                    break  # 停止解析
+                # 逗号后面不是 ')'，继续循环解析下一个参数
+            elif self._check('PUNCTUATOR', ')'):
+                # 找到右括号，参数列表正常结束
+                logging.debug(f"[_parse_argument_list] Found ')' after argument. Ending list.")
+                break
+            else:
+                # 参数后面既不是逗号也不是右括号，语法错误
+                # <<<< 之前的错误发生在这里，是因为 _check(',') 返回了 False？>>>>
+                # Let's log the token if this error occurs again
+                logging.error(
+                    f"[_parse_argument_list] After parsing argument, expected ',' or ')' but found: {self.current_token}")
+                self._error("Expected ',' or ')' after function argument", self.current_token)
+                break  # 停止解析
+
+        # 注意：此函数不消耗最后的 ')'，由调用者 (_parse_postfix_expression) 负责
+        logging.debug(f"[_parse_argument_list] Parsed arguments successfully: {args}")
+        return args
+
+    # --- 其他所有解析方法 (Statements, Expressions) ---
+    # (与上一版本相同，仅粘贴 _parse_primary_expression 以修正 UnboundLocalError)
+    def _parse_statement(self):  # ... (same as previous version) ...
+        loc_token = self.current_token;
+        line = loc_token.original_line if loc_token else None;
+        col = loc_token.column if loc_token else None
+        logging.debug(f"[_parse_statement] Current token: {self.current_token}")
+        if self._check_type_start(): return self._parse_declaration_statement()
+        if self._check('PUNCTUATOR', '{'): return self._parse_compound_statement()
+        if self._match('KEYWORD', 'if'): return self._parse_if_statement(line, col)
+        if self._match('KEYWORD', 'while'): return self._parse_while_statement(line, col)
+        if self._match('KEYWORD', 'for'): return self._parse_for_statement(line, col)
+        if self._match('KEYWORD', 'do'): return self._parse_do_while_statement(line, col)
+        if self._match('KEYWORD', 'return'): return self._parse_return_statement(line, col)
+        if self._match('KEYWORD', 'break'): self._consume('PUNCTUATOR', "Expected ';'",
+                                                          value=';'); return BreakStatement(line=line, column=col)
+        if self._match('KEYWORD', 'continue'): self._consume('PUNCTUATOR', "Expected ';'",
+                                                             value=';'); return ContinueStatement(line=line, column=col)
+        if self._match('PUNCTUATOR', ';'): logging.debug("Parsed empty statement (';')."); return None
+        if not self.current_token or self.current_token.type == 'EOF' or self._check('PUNCTUATOR', '}'): self._error(
+            "Expected statement or expression, found end of block or file", token=loc_token); return None
+        expr = self._parse_expression()
+        if expr is None: self._error("Invalid or missing expression where statement expected",
+                                     token=loc_token); return None
+        self._consume('PUNCTUATOR', "Expected ';' after expression statement", value=';')
+        return ExpressionStatement(expr, line=line, column=col)
+
+    def _parse_compound_statement(self):  # ... (same as previous version) ...
+        start_token = self.current_token;
+        start_line = start_token.original_line if start_token else None;
         start_col = start_token.column if start_token else None
+        logging.debug(f"[_parse_compound_statement] Starting with token: {start_token}");
         self._consume('PUNCTUATOR', "Expected '{' to start compound statement", value='{')
-        statements = []
-        # Loop until the closing brace is the current token
+        statements = [];
+        loop_guard = 0;
+        max_loop_guard = 1000
         while not self._check('PUNCTUATOR', '}'):
-            # Check for unexpected EOF inside the block
-            if not self.current_token or self.current_token.type == 'EOF':
-                self._error("Unexpected end of input, expected '}' to close block",
-                            token=start_token)  # Error at starting brace
-                break  # Avoid infinite loop
-
-            stmt = self._parse_statement()
-            if stmt is not None:  # Add statement unless it was an empty statement (;)
-                statements.append(stmt)
-            # If _parse_statement returned None due to an error, the exception should have been caught higher up
-            # or the loop condition will eventually fail
-
+            loop_guard += 1;
+            if loop_guard > max_loop_guard: self._error("Parser likely stuck in compound statement loop",
+                                                        token=self.current_token or start_token); break
+            if not self.current_token or self.current_token.type == 'EOF': self._error(
+                "Unexpected end of input, expected '}' to close block", token=start_token); break
+            token_before_stmt_parse = self.current_token
+            try:
+                stmt = self._parse_statement()
+                if stmt is not None: statements.append(stmt)
+                if self.current_token == token_before_stmt_parse and not self._check('PUNCTUATOR', '}'):
+                    logging.warning(
+                        f"[_parse_compound_statement] Token did not advance. Current: {self.current_token}.")
+                    self._error("Parser stuck inside compound statement", self.current_token)  # Trigger recovery
+            except ParseError as inner_e:
+                logging.error(f"[_parse_compound_statement] ParseError within block: {inner_e}");
+                logging.info("[_parse_compound_statement] Attempting recovery within block...")
+                self._synchronize(context='block_statement')
         self._consume('PUNCTUATOR', "Expected '}' to end compound statement", value='}')
         return CompoundStatement(statements, line=start_line, column=start_col)
 
-    def _parse_declaration_statement(self):
-        """解析局部变量声明。假定当前 token 是类型开始。"""
-        start_token = self.current_token
-        decl_type = self._parse_type()
-        pointer_level = 0
-        while self._match('OPERATOR', '*'):
-            pointer_level += 1
+    def _parse_declaration_statement(self):  # ... (same as previous version) ...
+        start_token = self.current_token;
+        logging.debug(f"[_parse_declaration_statement] Starting. Current token: {start_token}")
+        decl_type = self._parse_type();
+        if decl_type is None: return None
+        pointer_level = 0;
+        while self._match('OPERATOR', '*'): pointer_level += 1
         full_type_str = decl_type + '*' * pointer_level
-
+        if not self._check('IDENTIFIER'): self._error(
+            f"Expected variable name after type '{full_type_str}', found {self.current_token}",
+            token=self.current_token); return None
         name_token = self._consume('IDENTIFIER', f"Expected variable name after type '{full_type_str}'")
         name_identifier = Identifier(name_token.value, line=name_token.original_line, column=name_token.column)
-
         initializer = None
         if self._match('OPERATOR', '='):
-            initializer = self._parse_assignment_expression()
-            if initializer is None:  # Check if parsing initializer failed
-                self._error("Invalid initializer expression", token=self.current_token)  # Error at token after '='
-                # Decide whether to return partial node or None
-        # TODO: Handle array declarations like int arr[10];
-
-        self._consume('PUNCTUATOR', "Expected ';' after declaration statement", value=';')
-        start_line = start_token.original_line if start_token else None
-        start_col = start_token.column if start_token else None
-        decl_node = DeclarationStatement(full_type_str, name_identifier, initializer, line=start_line, column=start_col)
-        setattr(decl_node, 'is_prototype', False)  # Local declarations are not prototypes
+            initializer = self._parse_assignment_expression();
+            if initializer is None: self._error("Invalid initializer expression after '='", token=self.current_token)
+        elif self._check('PUNCTUATOR', '{'):
+            logging.debug("Parsing brace initializer (simplified).")
+            self._consume('PUNCTUATOR', "Expected '{'", value='{')
+            init_expr_in_brace = self._parse_assignment_expression()  # Simplification
+            if init_expr_in_brace is None: self._error("Expected expression inside {}", token=self.current_token)
+            self._consume('PUNCTUATOR', "Expected '}'", value='}');
+            initializer = init_expr_in_brace
+        self._consume('PUNCTUATOR', "Expected ';'", value=';')
+        line_info = start_token or name_token;
+        decl_line = line_info.original_line if line_info else None;
+        decl_col = line_info.column if line_info else None
+        decl_node = DeclarationStatement(full_type_str, name_identifier, initializer, line=decl_line, column=decl_col);
+        setattr(decl_node, 'is_prototype', False)
         return decl_node
 
-    def _parse_if_statement(self, line, col):
-        """解析 if-else 语句。假定 'if' 已被消耗。"""
-        self._consume('PUNCTUATOR', "Expected '(' after 'if' keyword", value='(')
-        condition = self._parse_expression()
-        if condition is None: self._error("Missing condition in 'if' statement"); return None  # Error recovery
-        self._consume('PUNCTUATOR', "Expected ')' after 'if' condition", value=')')
-        then_branch = self._parse_statement()
-        if then_branch is None and not self._check('KEYWORD', 'else'):  # Handle empty then branch ; followed by else
-            pass  # Allow if(...); else ... by checking if 'else' is next
-            # If then_branch is None because of parse error, it should have raised
-
+    def _parse_if_statement(self, line, col):  # ... (same as previous version) ...
+        logging.debug(f"[_parse_if_statement] Starting.");
+        self._consume('PUNCTUATOR', "Expected '(' after 'if'", value='(')
+        condition = self._parse_expression();
+        if condition is None: self._error("Missing condition in 'if'"); return None
+        self._consume('PUNCTUATOR', "Expected ')' after 'if' condition", value=')');
+        then_branch = self._parse_statement();
         else_branch = None
-        if self._match('KEYWORD', 'else'):
-            else_branch = self._parse_statement()
-
+        if self._match('KEYWORD', 'else'): else_branch = self._parse_statement()
         return IfStatement(condition, then_branch, else_branch, line=line, column=col)
 
-    def _parse_while_statement(self, line, col):
-        """解析 while 循环。假定 'while' 已被消耗。"""
-        self._consume('PUNCTUATOR', "Expected '(' after 'while' keyword", value='(')
-        condition = self._parse_expression()
-        if condition is None: self._error("Missing condition in 'while' statement"); return None
-        self._consume('PUNCTUATOR', "Expected ')' after 'while' condition", value=')')
+    def _parse_while_statement(self, line, col):  # ... (same as previous version) ...
+        logging.debug(f"[_parse_while_statement] Starting.");
+        self._consume('PUNCTUATOR', "Expected '(' after 'while'", value='(')
+        condition = self._parse_expression();
+        if condition is None: self._error("Missing condition in 'while'"); return None
+        self._consume('PUNCTUATOR', "Expected ')' after 'while' condition", value=')');
         body = self._parse_statement()
         return WhileStatement(condition, body, line=line, column=col)
 
-    def _parse_for_statement(self, line, col):
-        """解析 for 循环。假定 'for' 已被消耗。"""
-        self._consume('PUNCTUATOR', "Expected '(' after 'for' keyword", value='(')
+    def _parse_for_statement(self, line, col):  # ... (same as previous version) ...
+        logging.debug(f"[_parse_for_statement] Starting.");
+        self._consume('PUNCTUATOR', "Expected '(' after 'for'", value='(')
         init = None
-        # Parse initialization part
         if not self._check('PUNCTUATOR', ';'):
-            if self._check_type_start():  # Declaration inside for init
-                init = self._parse_declaration_statement()  # Consumes the trailing ';' itself! Need adjustment
-                # HACK/Fix: _parse_declaration_statement consumes ';', but for needs it. Backtrack conceptually.
-                # Let's modify parse_declaration to NOT consume the semicolon if called from here
-                # Or, parse parts manually here. Let's try manual parsing:
-                start_init_token = self.current_token
-                init_type = self._parse_type()
-                init_pointer_level = 0
-                while self._match('OPERATOR', '*'): init_pointer_level += 1
-                init_name_token = self._consume('IDENTIFIER', "Expected variable name in 'for' initializer")
-                init_name_id = Identifier(init_name_token.value, line=init_name_token.original_line,
-                                          column=init_name_token.column)
-                init_full_type = init_type + '*' * init_pointer_level
-                init_value = None
-                if self._match('OPERATOR', '='):
-                    init_value = self._parse_assignment_expression()
-                init_line = start_init_token.original_line if start_init_token else None
-                init_col = start_init_token.column if start_init_token else None
-                # Create node but *don't* consume semicolon yet
-                init = DeclarationStatement(init_full_type, init_name_id, init_value, line=init_line, column=init_col)
-                setattr(init, 'is_prototype', False)
-            else:  # Expression initializer
-                init = self._parse_expression()  # Does not consume semicolon
-        # Consume semicolon after initializer (or if initializer was empty)
-        self._consume('PUNCTUATOR', "Expected ';' after 'for' initializer expression", value=';')
-
-        # Parse condition part
+            if self._check_type_start():
+                decl_start_token = self.current_token;
+                decl_type_str = self._parse_type()
+                if not decl_type_str: self._error("Invalid type in 'for' init", decl_start_token); return None
+                ptr_level = 0;
+                while self._match('OPERATOR', '*'): ptr_level += 1; decl_type_str += '*' * ptr_level
+                if not self._check("IDENTIFIER"): self._error("Expected identifier in 'for' declaration",
+                                                              self.current_token); return None
+                name_tok = self._consume("IDENTIFIER", "Identifier expected in for declaration");
+                name_id = Identifier(name_tok.value, line=name_tok.original_line, column=name_tok.column)
+                init_expr = None
+                if self._match('OPERATOR', '='): init_expr = self._parse_assignment_expression();
+                if init_expr is None and self._last_consumed_token_for_error.value == '=': self._error(
+                    "Invalid initializer in 'for' declaration", self.current_token); return None
+                init_line = decl_start_token.original_line if decl_start_token else None;
+                init_col = decl_start_token.column if decl_start_token else None
+                init = DeclarationStatement(decl_type_str, name_id, init_expr, line=init_line, column=init_col);
+                setattr(init, 'is_for_init', True)
+            else:
+                init = self._parse_expression()
+        self._consume('PUNCTUATOR', "Expected ';' after 'for' initializer", value=';')
         condition = None
-        if not self._check('PUNCTUATOR', ';'):
-            condition = self._parse_expression()
-        self._consume('PUNCTUATOR', "Expected ';' after 'for' condition expression", value=';')
-
-        # Parse update part
+        if not self._check('PUNCTUATOR', ';'): condition = self._parse_expression()
+        self._consume('PUNCTUATOR', "Expected ';' after 'for' condition", value=';')
         update = None
-        if not self._check('PUNCTUATOR', ')'):
-            update = self._parse_expression()
+        if not self._check('PUNCTUATOR', ')'): update = self._parse_expression()
         self._consume('PUNCTUATOR', "Expected ')' after 'for' clauses", value=')')
-
-        # Parse loop body
         body = self._parse_statement()
         return ForStatement(init, condition, update, body, line=line, column=col)
 
-    def _parse_do_while_statement(self, line, col):
-        """解析 do-while 循环。假定 'do' 已被消耗。"""
+    def _parse_do_while_statement(self, line, col):  # ... (same as previous version) ...
+        logging.debug(f"[_parse_do_while_statement] Starting.");
         body = self._parse_statement()
-        # Handle case where body is empty statement (just ';')
-        if body is None and not self._check('KEYWORD', 'while'):
-            self._error("Expected 'while' after 'do' body (body cannot be just ';')",
-                        token=self.current_token)  # Or use token before semicolon
-            return None
-
-        if not self._match('KEYWORD', 'while'):
-            self._error("Expected 'while' keyword after 'do' body")
-            return None
-        self._consume('PUNCTUATOR', "Expected '(' after 'while' in do-while", value='(')
+        if not self._match('KEYWORD', 'while'): self._error("Expected 'while' after 'do' body",
+                                                            token=self.current_token or self._last_consumed_token_for_error); return None
+        self._consume('PUNCTUATOR', "Expected '(' after 'while'", value='(');
         condition = self._parse_expression()
-        if condition is None: self._error("Missing condition in 'do-while' statement"); return None
-        self._consume('PUNCTUATOR', "Expected ')' after 'do-while' condition", value=')')
-        self._consume('PUNCTUATOR', "Expected ';' after 'do-while' statement", value=';')
+        if condition is None: self._error("Missing condition in 'do-while'"); return None
+        self._consume('PUNCTUATOR', "Expected ')' after 'do-while' condition", value=')');
+        self._consume('PUNCTUATOR', "Expected ';' after 'do-while'", value=';')
         return DoWhileStatement(body, condition, line=line, column=col)
 
-    def _parse_return_statement(self, line, col):
-        """解析 return 语句。假定 'return' 已被消耗。"""
+    def _parse_return_statement(self, line, col):  # ... (same as previous version) ...
+        logging.debug(f"[_parse_return_statement] Starting.");
         value = None
-        # If the next token is not ';', parse an expression
         if not self._check('PUNCTUATOR', ';'):
-            value = self._parse_expression()
-            # Check if expression parsing failed
-            if value is None:
-                self._error("Expected expression or ';' after 'return'")
-                # Return a node even on error? Or None? Let's return node with None value.
-                value = None  # Reset value if expression parsing failed badly
-        # Expect and consume the semicolon
-        self._consume('PUNCTUATOR', "Expected ';' after return statement", value=';')
+            value = self._parse_expression();
+            if value is None and not self._check('PUNCTUATOR', ';'): self._error("Invalid expression for 'return'",
+                                                                                 self.current_token)
+        self._consume('PUNCTUATOR', "Expected ';' after return", value=';')
         return ReturnStatement(value, line=line, column=col)
 
-    def _parse_parameter_list(self):
-        """解析函数参数列表。 handles (), (void), (type name, ...)。"""
-        params = []
-        # Handle empty parameter list '()'
-        if self._check('PUNCTUATOR', ')'):
-            return []  # Empty list, will be consumed by caller
+    def _get_precedence(self, token):  # ... (same as previous version) ...
+        if not token: return -1
+        if token.type == 'OPERATOR' or (token.type == 'PUNCTUATOR' and token.value == '?'): return self.PRECEDENCE.get(
+            token.value, -1)
+        return -1
 
-        # Handle '(void)'
-        if self._check('KEYWORD', 'void') and self._check_peek('PUNCTUATOR', ')'):
-            self._advance()  # Consume 'void'
-            # Caller will consume ')'
-            return []  # Represent (void) as empty list
-
-        # If not empty or void, parse first parameter
-        params.append(self._parse_parameter())
-        # Parse subsequent parameters separated by commas
-        while self._match('PUNCTUATOR', ','):
-            if self._check('PUNCTUATOR', ')'):  # Error: trailing comma before ')'
-                self._error("Unexpected ')' after comma in parameter list.")
-                break
-            # Check for varargs '...'
-            if self._check('OPERATOR', '...'):  # Assuming lexer yields '...' as OPERATOR
-                # TODO: Handle varargs - add special marker to params?
-                self._match('OPERATOR', '...')  # Consume '...'
-                logging.warning("Varargs (...) handling not fully implemented in AST.")
-                break  # Stop parsing params after ...
-            params.append(self._parse_parameter())
-
-        return params
-
-    def _parse_parameter(self):
-        """解析单个函数参数 (type [*] [name])。"""
-        start_token = self.current_token
-        param_type = self._parse_type()  # Consumes type keywords
-        pointer_level = 0
-        while self._match('OPERATOR', '*'):
-            pointer_level += 1
-        full_param_type = param_type + '*' * pointer_level
-
-        name_identifier = None
-        # Parameter name is optional (e.g., in prototypes or unnamed params)
-        if self._check('IDENTIFIER'):
-            name_token = self._consume('IDENTIFIER', "Internal check failed: expected IDENTIFIER")
-            name_identifier = Identifier(name_token.value, line=name_token.original_line, column=name_token.column)
-        # If no identifier, check if it's followed by ',' or ')', otherwise maybe error?
-        elif not self._check('PUNCTUATOR', ')') and not self._check('PUNCTUATOR', ','):
-            # Allow unnamed parameters like 'int, float' if followed by comma or )
-            pass  # It's a valid unnamed parameter in this context
-            # self._error("Expected parameter name, comma, or closing parenthesis", token=self.current_token)
-
-        start_line = start_token.original_line if start_token else None
-        start_col = start_token.column if start_token else None
-        return Parameter(full_param_type, name_identifier, line=start_line, column=start_col)
-
-    # --- 表达式解析 (Precedence Climbing) ---
-
-    def _get_precedence(self, token):
-        """获取二元运算符的优先级。"""
-        if not token or token.type != 'OPERATOR':
-            return -1
-        return self.PRECEDENCE.get(token.value, -1)
-
-    def _parse_expression(self, min_precedence=0):
-        """使用优先级爬升解析二元和一元表达式。"""
-        # --- <<< MODIFICATION: Parse unary first >>> ---
-        # Parse the left-hand side, which could be a primary expression
-        # or include prefix unary operators.
-        lhs = self._parse_unary_expression()
-        if lhs is None:
-            # Error already reported by _parse_unary_expression or its callees
-            return None
-        # --- <<< END MODIFICATION >>> ---
-
+    def _parse_expression(self, min_precedence=0):  # ... (same as previous version) ...
+        lhs = self._parse_unary_expression();
+        if lhs is None: return None
         while True:
-            # Look at the next operator
-            op_token = self.current_token
-            if not op_token or op_token.type != 'OPERATOR':
-                # DEBUG: print(f"Expression loop break: Not an operator {op_token}")
-                break  # Not an operator, end of this precedence level
-
+            op_token = self.current_token;
+            is_binary_op_candidate = op_token and (
+                    op_token.type == 'OPERATOR' or (op_token.type == 'PUNCTUATOR' and op_token.value == '?'))
+            if not is_binary_op_candidate: break
             precedence = self._get_precedence(op_token)
-            # DEBUG: print(f"Expression loop: Op={op_token.value}, Prec={precedence}, MinPrec={min_precedence}")
-
-            # Check precedence relative to the current minimum
-            if precedence < min_precedence:
-                # DEBUG: print(f"Expression loop break: Precedence {precedence} < {min_precedence}")
-                break  # Operator has lower precedence than current context allows
-
-            # Determine associativity for next recursive call's precedence
-            # Right-associative operators call recursively with same precedence
-            # Left-associative operators call recursively with precedence + 1
-            next_min_precedence = precedence + (1 if op_token.value not in self.RIGHT_ASSOC else 0)
-
-            # Consume the operator
+            if precedence < min_precedence: break
+            if op_token.value == '?':
+                self._advance();
+                true_expr = self._parse_expression(0)
+                if true_expr is None: self._error("Expected expression after '?'", token=op_token); return None
+                self._consume('PUNCTUATOR', "Expected ':' in ternary op", value=':');
+                false_expr = self._parse_expression(self.PRECEDENCE['?'])
+                if false_expr is None: self._error("Expected expression after ':'",
+                                                   token=self.current_token); return None
+                op_line = op_token.original_line;
+                op_col = op_token.column;
+                lhs = TernaryOp(lhs, true_expr, false_expr, line=op_line, column=op_col);
+                continue
+            next_min_precedence = precedence + (1 if op_token.value not in self.RIGHT_ASSOC else 0);
             self._advance()
-
-            # Parse the right-hand side operand recursively
             rhs = self._parse_expression(next_min_precedence)
-            if rhs is None:
-                # Error should have been raised by recursive call
-                # Provide context if needed
-                self._error("Expected expression after binary operator", token=op_token)
-                return None  # Stop parsing this expression branch
-
-            # Combine LHS and RHS with the operator
-            op_line = op_token.original_line if op_token else None
-            op_col = op_token.column if op_token else None
-            # Check for assignment operator LValue (Syntax check only)
-            is_lvalue_syntax_ok = isinstance(lhs, (Identifier, ArraySubscript, MemberAccess)) or \
-                                  (isinstance(lhs, UnaryOp) and lhs.op == '*')
-            if op_token.value in self.RIGHT_ASSOC and op_token.value != '?' and not is_lvalue_syntax_ok:
-                # Report syntax error, but still build node for potential semantic check
-                self._error(f"Invalid left-hand side in assignment operator '{op_token.value}'",
-                            token=op_token)  # Error points to operator
-
-            # Build the BinaryOp node
+            if rhs is None: self._error(f"Expected expression after binary op '{op_token.value}'",
+                                        token=op_token); return None
+            op_line = op_token.original_line;
+            op_col = op_token.column
+            is_lvalue_syntax_ok = isinstance(lhs, (Identifier, ArraySubscript, MemberAccess)) or (
+                    isinstance(lhs, UnaryOp) and lhs.op == '*')
+            if op_token.value in self.RIGHT_ASSOC and op_token.value != '?' and not is_lvalue_syntax_ok: self._error(
+                f"Invalid L-value for assignment '{op_token.value}'", token=op_token)
             lhs = BinaryOp(op_token.value, lhs, rhs, line=op_line, column=op_col)
-            # Continue loop to check for operators with potentially higher precedence
         return lhs
 
     def _parse_assignment_expression(self):
-        """解析赋值表达式 (最低常规优先级)。"""
-        # Precedence 1 includes assignment operators like =, += etc.
         return self._parse_expression(min_precedence=1)
 
-    def _parse_unary_expression(self):
-        """解析前缀一元运算符 ('+', '-', '!', '~', '++', '--', '*', '&') 和 sizeof。"""
-        op_token = self.current_token
-        # Check for prefix unary operators
-        prefix_ops = ['-', '+', '!', '~', '++', '--', '*', '&']  # Note: ++/-- here are prefix
+    def _parse_unary_expression(self):  # ... (same as previous version) ...
+        op_token = self.current_token;
+        prefix_ops = ['-', '+', '!', '~', '++', '--', '*', '&']
         if self._check('OPERATOR') and op_token.value in prefix_ops:
-            op_str = op_token.value
-            op_line = op_token.original_line if op_token else None
-            op_col = op_token.column if op_token else None
-            self._advance()  # Consume the operator
-
-            # Map ++/-- to distinct prefix versions for AST
-            ast_op = '++p' if op_str == '++' else '--p' if op_str == '--' else op_str
-
-            # Recursively parse the operand (which could be another unary expression)
+            op_str = op_token.value;
+            op_line = op_token.original_line if op_token else None;
+            op_col = op_token.column if op_token else None;
+            self._advance()
+            ast_op = '++p' if op_str == '++' else '--p' if op_str == '--' else op_str;
             operand = self._parse_unary_expression()
-            if operand is None:
-                self._error("Expected expression after unary operator", token=op_token)
-                return None
-
-            # --- Syntax LValue Checks for specific operators ---
-            # Check if operand is syntactically an LValue
-            is_operand_lvalue = isinstance(operand, (Identifier, ArraySubscript, MemberAccess)) or \
-                                (isinstance(operand, UnaryOp) and operand.op == '*')
-
-            if op_str in ['++', '--'] and not is_operand_lvalue:
-                # Prefix ++/-- require an LValue operand
-                self._error(f"Operand of prefix operator '{op_str}' must be an lvalue", token=op_token)
-                # Continue building node for potential semantic analysis? Or return None? Let's build.
-
-            if op_str == '&' and not is_operand_lvalue:
-                # Address-of operator requires an LValue
-                self._error(f"Cannot take the address of a non-lvalue using operator '&'", token=op_token)
-                # Continue building node
-
+            if operand is None: self._error(f"Expected expression after unary op '{op_str}'",
+                                            token=op_token); return None
+            is_operand_lvalue = isinstance(operand, (Identifier, ArraySubscript, MemberAccess)) or (
+                    isinstance(operand, UnaryOp) and operand.op == '*')
+            if op_str in ['++', '--'] and not is_operand_lvalue: self._error(
+                f"Operand of prefix op '{op_str}' must be L-value", token=op_token)
+            if op_str == '&' and not (is_operand_lvalue or isinstance(operand, Identifier)): pass  # Simplified check
             return UnaryOp(ast_op, operand, line=op_line, column=op_col)
-
-        # Check for sizeof operator
         elif self._match('KEYWORD', 'sizeof'):
-            start_sizeof_token = self.current_token  # Token *after* sizeof keyword
-            sizeof_line = start_sizeof_token.original_line if start_sizeof_token else None
-            sizeof_col = start_sizeof_token.column if start_sizeof_token else None
-            target = None
-
-            # Check for sizeof(type) vs sizeof expression
+            start_sizeof_token = self._last_consumed_token_for_error;
+            sizeof_line = start_sizeof_token.original_line if start_sizeof_token else None;
+            sizeof_col = start_sizeof_token.column if start_sizeof_token else None;
+            target_operand_for_ast = None
             if self._match('PUNCTUATOR', '('):
-                if self._check_type_start():  # sizeof(type)
-                    target_type = self._parse_type()  # Consumes type keywords
-                    pointer_level = 0
-                    while self._match('OPERATOR', '*'): pointer_level += 1
-                    target = target_type + '*' * pointer_level  # Store type as string
-                    self._consume('PUNCTUATOR', "Expected ')' after type in sizeof", value=')')
-                else:  # sizeof(expression)
-                    target = self._parse_expression()  # Parse the expression inside
-                    self._consume('PUNCTUATOR', "Expected ')' after expression in sizeof", value=')')
-            else:  # sizeof expression (without parentheses, applies to unary expression)
-                target = self._parse_unary_expression()
-
-            if target is None:
-                self._error("Expected type or expression after 'sizeof'", token=start_sizeof_token)
-                return None
-            # Create UnaryOp node for sizeof
-            return UnaryOp('sizeof', target, line=sizeof_line, column=sizeof_col)
-
+                if self._check_type_start():
+                    parsed_target_type = self._parse_type()
+                    if parsed_target_type:
+                        ptr_level = 0
+                        while self._match('OPERATOR',
+                                          '*'): ptr_level += 1; target_operand_for_ast = parsed_target_type + "*" * ptr_level
+                    else:
+                        self._error("Invalid type specifier in sizeof(...)", token=start_sizeof_token);
+                        return None
+                else:
+                    target_operand_for_ast = self._parse_expression();
+                if target_operand_for_ast is None: self._error("Invalid expression in sizeof(...)",
+                                                               token=self.current_token or start_sizeof_token); return None
+                self._consume('PUNCTUATOR', "Expected ')' after sizeof operand", value=')')
+            else:
+                target_operand_for_ast = self._parse_unary_expression();
+            if target_operand_for_ast is None: self._error("Expected expression or type after 'sizeof'",
+                                                           token=start_sizeof_token); return None
+            return UnaryOp('sizeof', target_operand_for_ast, line=sizeof_line, column=sizeof_col)
         else:
-            # If not a prefix operator or sizeof, parse postfix/primary expression
             return self._parse_postfix_expression()
 
+    # --- <<< 修正后的 _parse_postfix_expression >>> ---
     def _parse_postfix_expression(self):
-        """解析后缀运算符：(), [], ++, --, ., ->"""
-        # First, parse the base primary expression or potential prefix unary result
         expr = self._parse_primary_expression()
-        if expr is None:
-            return None  # Error already reported
+        if expr is None: return None
 
-        # Then, loop to handle any postfix operators attached to it
         while True:
             op_token = self.current_token
-            if not op_token or op_token.type == "EOF":
-                break  # No more tokens or no postfix operator
+            if not op_token or op_token.type == "EOF": break
 
-            op_line = op_token.original_line if op_token else None
-            op_col = op_token.column if op_token else None
+            op_line = op_token.original_line if op_token else (getattr(expr, 'line', None))
+            op_col = op_token.column if op_token else (getattr(expr, 'column', None))
 
-            if self._match('PUNCTUATOR', '('):  # Function Call: expr(...)
-                args = self._parse_argument_list()
+            if self._match('PUNCTUATOR', '('):
+                args = self._parse_argument_list()  # Corrected arg list parsing
                 self._consume('PUNCTUATOR', "Expected ')' after function call arguments", value=')')
-                expr = CallExpression(expr, args, line=op_line, column=op_col)  # Update expr with CallExpression node
-            elif self._match('OPERATOR', '++'):  # Postfix Increment: expr++
-                # Syntax LValue check
-                is_expr_lvalue = isinstance(expr, (Identifier, ArraySubscript, MemberAccess)) or (
-                        isinstance(expr, UnaryOp) and expr.op == '*')
-                if not is_expr_lvalue: self._error("Operand of postfix '++' must be an lvalue", token=op_token)
-                expr = UnaryOp('p++', expr, line=op_line, column=op_col)  # Update expr
-            elif self._match('OPERATOR', '--'):  # Postfix Decrement: expr--
-                is_expr_lvalue = isinstance(expr, (Identifier, ArraySubscript, MemberAccess)) or (
-                        isinstance(expr, UnaryOp) and expr.op == '*')
-                if not is_expr_lvalue: self._error("Operand of postfix '--' must be an lvalue", token=op_token)
-                expr = UnaryOp('p--', expr, line=op_line, column=op_col)  # Update expr
-            elif self._match('PUNCTUATOR', '['):  # Array Subscript: expr[...]
+                expr = CallExpression(expr, args, line=op_line, column=op_col)
+                continue  # Continue checking for more postfix ops
+
+            elif self._match('PUNCTUATOR', '['):
                 index_expr = self._parse_expression()
-                if index_expr is None: self._error("Expected index expression inside '[]'",
-                                                   token=op_token); break  # Stop if index fails
+                # --- Correct indentation START ---
+                if index_expr is None:
+                    self._error("Expected index expression inside '[]'", token=op_token)
+                    break  # Stop postfix parsing on error
                 self._consume('PUNCTUATOR', "Expected ']' after array index", value=']')
-                expr = ArraySubscript(expr, index_expr, line=op_line, column=op_col)  # Update expr
-            elif self._match('OPERATOR', '.'):  # Member Access: expr.member
+                expr = ArraySubscript(expr, index_expr, line=op_line, column=op_col)
+                # --- Correct indentation END ---
+                continue  # Continue checking
+
+            elif self._match('OPERATOR', '++'):
+                is_expr_lvalue = isinstance(expr, (Identifier, ArraySubscript, MemberAccess)) or \
+                                 (isinstance(expr, UnaryOp) and expr.op == '*')
+                if not is_expr_lvalue:
+                    self._error("Operand of postfix '++' must be an lvalue", token=self._last_consumed_token_for_error)
+                expr = UnaryOp('p++', expr, line=op_line, column=op_col)  # Create node regardless
+                continue  # Continue checking
+
+            elif self._match('OPERATOR', '--'):
+                is_expr_lvalue = isinstance(expr, (Identifier, ArraySubscript, MemberAccess)) or \
+                                 (isinstance(expr, UnaryOp) and expr.op == '*')
+                if not is_expr_lvalue:
+                    self._error("Operand of postfix '--' must be an lvalue", token=self._last_consumed_token_for_error)
+                expr = UnaryOp('p--', expr, line=op_line, column=op_col)  # Create node regardless
+                continue  # Continue checking
+
+            elif self._match('OPERATOR', '.'):
                 member_token = self._consume('IDENTIFIER', "Expected member identifier after '.'")
                 member_id = Identifier(member_token.value, line=member_token.original_line, column=member_token.column)
-                expr = MemberAccess(expr, member_id, is_pointer=False, line=op_line, column=op_col)  # Update expr
-            elif self._match('OPERATOR', '->'):  # Pointer Member Access: expr->member
+                expr = MemberAccess(expr, member_id, is_pointer=False, line=op_line, column=op_col)
+                continue  # Continue checking
+
+            elif self._match('OPERATOR', '->'):
                 member_token = self._consume('IDENTIFIER', "Expected member identifier after '->'")
                 member_id = Identifier(member_token.value, line=member_token.original_line, column=member_token.column)
-                expr = MemberAccess(expr, member_id, is_pointer=True, line=op_line, column=op_col)  # Update expr
+                expr = MemberAccess(expr, member_id, is_pointer=True, line=op_line, column=op_col)
+                continue  # Continue checking
             else:
-                # Not a recognized postfix operator, break the loop
-                break
-        return expr  # Return the final expression node after all postfix ops applied
+                break  # No more postfix operators matched
+        return expr
 
+    # --- <<< 修正后的 _parse_primary_expression (初始化 final_cast_type) >>> ---
     def _parse_primary_expression(self):
-        """解析字面量、标识符、括号表达式和 C 风格类型转换。"""
         token = self.current_token
-        if not token or token.type == "EOF":
-            self._error("Unexpected EOF expecting primary expression")
-            return None
-        line = token.original_line if token else None
-        col = token.column if token else None
+        if not token or token.type == "EOF": self._error("Unexpected EOF expecting primary expression",
+                                                         token=token); return None
+        line = token.original_line if token else None;
+        col = token.column if token else None;
         node = None
 
-        if self._check('INTEGER_LITERAL'):
-            token = self._consume('INTEGER_LITERAL', "Internal error: integer literal expected")
-            node = IntegerLiteral(token.value, line=line, column=col)
-        elif self._check('FLOAT_LITERAL'):
-            token = self._consume('FLOAT_LITERAL', "Internal error: float literal expected")
-            node = FloatLiteral(token.value, line=line, column=col)
-        elif self._check('STRING_LITERAL'):
-            token = self._consume('STRING_LITERAL', "Internal error: string literal expected")
-            node = StringLiteral(token.value, line=line, column=col)
-        elif self._check('CHAR_LITERAL'):
-            token = self._consume('CHAR_LITERAL', "Internal error: char literal expected")
-            node = CharLiteral(token.value, line=line, column=col)
-        elif self._check('IDENTIFIER'):
-            token = self._consume('IDENTIFIER', "Internal error: identifier expected")
-            node = Identifier(token.value, line=line, column=col)
+        # Literals and Identifiers
+        if self._match('INTEGER_LITERAL'):
+            node = IntegerLiteral(self._last_consumed_token_for_error.value, line=line, column=col)
+        elif self._match('FLOAT_LITERAL'):
+            node = FloatLiteral(self._last_consumed_token_for_error.value, line=line, column=col)
+        elif self._match('STRING_LITERAL'):
+            node = StringLiteral(self._last_consumed_token_for_error.value, line=line, column=col)
+        elif self._match('CHAR_LITERAL'):
+            node = CharLiteral(self._last_consumed_token_for_error.value, line=line, column=col)
+        elif self._match('IDENTIFIER'):
+            node = Identifier(self._last_consumed_token_for_error.value, line=line, column=col)
+        elif self._match('KEYWORD', 'true'):
+            node = BooleanLiteral(True, line=line, column=col)
+        elif self._match('KEYWORD', 'false'):
+            node = BooleanLiteral(False, line=line, column=col)
+        elif self._match('KEYWORD', 'nullptr'):
+            node = NullPtrLiteral(line=line, column=col)
 
-        elif self._check('PUNCTUATOR', '('):  # Could be parentheses or C-style cast
-            start_paren_token = self.current_token
-            paren_line = start_paren_token.original_line if start_paren_token else None
-            paren_col = start_paren_token.column if start_paren_token else None
+        # Parenthesized expression or C-style cast
+        elif self._check('PUNCTUATOR', '('):
+            paren_start_token = self.current_token;
+            paren_line = paren_start_token.original_line;
+            paren_col = paren_start_token.column
             self._advance()  # Consume '('
 
-            # Check if it looks like a C-style cast: ( type ) ...
-            # Use peek_token to check for ')' immediately after the type
+            is_cast = False
+            final_cast_type = None  # <<< Initialize here >>>
+
+            # Check if it could be a cast (starts with a type)
             if self._check_type_start():
-                # Potential cast, need to look ahead for ')'
-                # This requires a temporary parse or more complex lookahead.
-                # Let's try a simpler approach: parse type, check for ')'.
-                logging.debug(f"Possible cast detected starting with {self.current_token}")
-                target_type = self._parse_type()  # Consumes type tokens
-                pointer_level = 0
-                while self._match('OPERATOR', '*'):
-                    pointer_level += 1
-                full_target_type = target_type + '*' * pointer_level
+                cast_target_type_str = self._parse_type()
+                if cast_target_type_str:
+                    pointer_level = 0;
+                    while self._match('OPERATOR', '*'): pointer_level += 1
+                    # Assign final_cast_type *after* parsing type and pointers
+                    final_cast_type = cast_target_type_str + "*" * pointer_level
 
-                # NOW, check if the *next* token is ')'
-                if self._check('PUNCTUATOR', ')'):
-                    self._advance()  # Consume ')'
-                    # Successfully parsed (type), now parse the expression to cast
-                    # Cast has high precedence, binds tightly to the following unary expression
-                    expression_to_cast = self._parse_unary_expression()
-                    if expression_to_cast is None:
-                        # Use the token *after* the cast's ')' for error location if possible
-                        self._error("Expected expression following cast operator '(type)'",
-                                    token=self.current_token or start_paren_token)
+                    # Check if the type is immediately followed by ')'
+                    if self._check('PUNCTUATOR', ')'):
+                        self._consume('PUNCTUATOR', "Expected ')' after type in cast", value=')')
+                        expression_to_cast = self._parse_unary_expression()  # Parse expression being cast
+                        if expression_to_cast is None:
+                            self._error("Expected expression following C-style cast '(type)'",
+                                        token=self.current_token or paren_start_token);
+                            return None
+                        # Now it's safe to use final_cast_type
+                        node = CastExpression(final_cast_type, expression_to_cast, line=paren_line, column=paren_col)
+                        is_cast = True  # Mark as successful cast
+                    else:  # Missing ')' after potential type - error
+                        # final_cast_type is assigned, but syntax is wrong
+                        self._error(
+                            f"Expected ')' to complete cast after type '{final_cast_type}', found {self.current_token}",
+                            token=self.current_token);
                         return None
-                    # Create the CastExpression node
-                    logging.debug(f"Successfully parsed CastExpression: ({full_target_type}) ...")
-                    node = CastExpression(full_target_type, expression_to_cast, line=paren_line, column=paren_col)
-                else:
-                    # It wasn't `(type)`, it was `(type ...` perhaps a function call returning a type? Or just `(type)` alone?
-                    # Treat as a regular parenthesized expression that *happens* to start with a type keyword
-                    # This might occur in complex expressions or error cases. We need to "put back" the type tokens.
-                    # THIS IS HARD WITHOUT A PUSHBACK MECHANISM.
-                    # For simplicity now, we'll assume if a type is followed by ')', it's a cast.
-                    # If not followed by ')', assume it's a parenthesized expression that starts with something
-                    # that happens to also be a type keyword (like an identifier that matches 'int').
-                    # Let's raise an error for now if it's ambiguous like (int i = 0)
-                    self._error(f"Ambiguous syntax or missing ')' after potential type cast '{full_target_type}'",
-                                token=self.current_token or start_paren_token)
-                    # We should backtrack or handle parenthesized expressions differently.
-                    # ---->> REVISING: Let's parse as normal expression if ')' doesn't follow type <<----
-                    # This means we need to "reset" the parser state to before _parse_type was called.
-                    # This is complex. A simpler parser might parse (expr) first, then check if expr IS a type node.
-                    # Given the current structure, let's stick to the explicit check for (type)<unary_expr>
+                # else: _parse_type failed, fall through to grouped expression
 
-                    # --- Fallback to regular parentheses if not (type) structure ---
-                    # Note: The above block now handles the cast case. If we reach here after '('
-                    # it means _check_type_start() was false.
-                    node = self._parse_expression()  # Parse expression inside ()
-                    if node is None:
-                        self._error("Expected expression inside parentheses",
-                                    token=self.current_token or start_paren_token)
-                        return None
-                    self._consume('PUNCTUATOR', "Expected ')' to close parenthesized expression", value=')')
-
-            else:  # Not a type starts after '(', must be regular parenthesized expr
-                node = self._parse_expression()
-                if node is None:
-                    self._error("Expected expression inside parentheses", token=self.current_token or start_paren_token)
-                    return None
+            # If it wasn't parsed as a cast
+            if not is_cast:
+                node = self._parse_expression()  # Parse as grouped expression
+                if node is None: self._error("Expected expression inside parentheses",
+                                             token=self.current_token or paren_start_token); return None
                 self._consume('PUNCTUATOR', "Expected ')' to close parenthesized expression", value=')')
         else:
-            # Token is not a literal, identifier, or '('
-            self._error(
-                f"Unexpected token '{token.value}' ({token.type}), expected primary expression (literal, identifier, or '(')",
-                token=token)
+            self._error(f"Unexpected token, expected primary expression", token=token);
             return None
         return node
 
-    def _parse_argument_list(self):
-        """解析函数调用参数。 Handles empty list () and list with args."""
-        args = []
-        # If the next token is ')', it's an empty list
-        if self._check('PUNCTUATOR', ')'):
-            return args
 
-        # Parse the first argument
-        # Arguments are assignment expressions (lowest precedence before comma)
-        expr = self._parse_assignment_expression()
-        if expr is None:
-            # Error should have been raised by _parse_assignment_expression
-            self._error("Expected expression as function argument", token=self.current_token)
-            return []  # Return empty list on error? Or propagate None? Let's return empty.
-        args.append(expr)
-
-        # Parse subsequent arguments separated by commas
-        while self._match('PUNCTUATOR', ','):
-            # Check for immediate ')' after comma (syntax error)
-            if self._check('PUNCTUATOR', ')'):
-                self._error("Unexpected ')' after comma in argument list.")
-                break
-            # Parse the next argument expression
-            expr = self._parse_assignment_expression()
-            if expr is None:
-                self._error("Expected expression after comma in argument list")
-                break  # Stop parsing args on error
-            args.append(expr)
-
-        return args
-
-
+# --- AST 打印函数 ---
+# (需要将 print_ast_tree 函数定义粘贴到此处)
 def print_ast_tree(node, indent="", last=True, prefix=""):
-    """递归打印 AST 树，包含 CastExpression 处理。"""
-    if node is None:
-        # Handle None nodes gracefully, perhaps indicating an optional child wasn't present
-        # print(f"{indent}{'└── ' if last else '├── '}{prefix}None")
-        return  # Or print nothing for None nodes
-
-    connector = '└── ' if last else '├── '
-    node_repr = ""
-    children = []  # List of tuples: (prefix, child_node_or_list, is_list_flag)
-    line = getattr(node, 'line', None)
-    col = getattr(node, 'column', None)
-    line_info = f"(L{line}:{col})" if line is not None and col is not None else f"(L{line})" if line is not None else "(NoLoc)"
-
-    # --- Node Type Specific Representation ---
+    """递归打印 AST 树。"""
+    # (与上一版本相同)
+    if node is None: return
+    connector = '└── ' if last else '├── ';
+    node_repr = "";
+    children_info = []
+    line = getattr(node, 'line', None);
+    col = getattr(node, 'column', None);
+    loc_info = f" (L{line}:C{col})" if line is not None and col is not None else f" (L{line})" if line is not None else " (NoLoc)"
+    node_type_name = type(node).__name__;
+    specific_info = ""
     if isinstance(node, Program):
-        node_repr = f"Program {line_info}"
-        children = [("declarations", node.declarations)]
+        children_info = [("declarations", node.declarations)]
     elif isinstance(node, FunctionDefinition):
-        node_repr = f"FunctionDefinition: {node.name.name} (returns: {node.return_type}) {line_info}"
-        children = [
-            ("params", node.params), ("body", node.body)]
+        specific_info = f": {node.name.name} (returns: {node.return_type})";
+        children_info = [("name_id", node.name),
+                         ("params", node.params),
+                         ("body", node.body)]
     elif isinstance(node, Parameter):
-        name_str = node.name.name if node.name else "<unnamed>"
-        node_repr = f"Parameter: {name_str} (type: {node.param_type}) {line_info}"
-        children = [
-            ("name", node.name)]  # Show name identifier node if exists
+        name_str = node.name.name if node.name else "<unnamed>";
+        specific_info = f": {name_str} (type: {node.param_type})"
     elif isinstance(node, CompoundStatement):
-        node_repr = f"CompoundStatement {line_info}"
-        children = [("statements", node.statements)]
+        children_info = [("statements", node.statements)]
     elif isinstance(node, DeclarationStatement):
         proto_str = " (prototype)" if getattr(node, 'is_prototype',
-                                              False) else ""
-        node_repr = f"DeclarationStatement: {node.name.name} (type: {node.decl_type}){proto_str} {line_info}"
-        children = [
-            ("name", node.name), ("initializer", node.initializer)]  # prototype_params handled below if exists
+                                              False) else "";
+        for_init_str = " (for-init)" if getattr(node,
+                                                'is_for_init',
+                                                False) else "";
+        specific_info = f": {node.name.name} (type: {node.decl_type}){proto_str}{for_init_str}";
+        children_info = [
+            ("name_id", node.name), ("initializer", node.initializer)];
     elif isinstance(node, ExpressionStatement):
-        node_repr = f"ExpressionStatement {line_info}"
-        children = [("expression", node.expression)]
+        children_info = [("expression", node.expression)]
     elif isinstance(node, IfStatement):
-        node_repr = f"IfStatement {line_info}"
-        children = [("condition", node.condition), ("then", node.then_branch),
-                    ("else", node.else_branch)]
+        children_info = [("condition", node.condition), ("then_branch", node.then_branch),
+                         ("else_branch", node.else_branch)]
     elif isinstance(node, WhileStatement):
-        node_repr = f"WhileStatement {line_info}"
-        children = [("condition", node.condition), ("body", node.body)]
+        children_info = [("condition", node.condition), ("body", node.body)]
     elif isinstance(node, ForStatement):
-        node_repr = f"ForStatement {line_info}"
-        children = [("init", node.init), ("condition", node.condition),
-                    ("update", node.update), ("body", node.body)]
+        children_info = [("init", node.init), ("condition", node.condition), ("update", node.update),
+                         ("body", node.body)]
     elif isinstance(node, DoWhileStatement):
-        node_repr = f"DoWhileStatement {line_info}"
-        children = [("body", node.body), ("condition", node.condition)]
+        children_info = [("body", node.body), ("condition", node.condition)]
     elif isinstance(node, BreakStatement):
-        node_repr = f"BreakStatement {line_info}"
+        pass
     elif isinstance(node, ContinueStatement):
-        node_repr = f"ContinueStatement {line_info}"
+        pass
     elif isinstance(node, ReturnStatement):
-        node_repr = f"ReturnStatement {line_info}"
-        children = [("value", node.value)]
+        children_info = [("value", node.value)]
     elif isinstance(node, Identifier):
-        node_repr = f"Identifier: {node.name} {line_info}"
+        specific_info = f": {node.name}"
     elif isinstance(node, IntegerLiteral):
-        node_repr = f"IntegerLiteral: {node.value} (raw='{node.raw_value}') {line_info}"
+        specific_info = f": {node.value}"
     elif isinstance(node, FloatLiteral):
-        node_repr = f"FloatLiteral: {node.value} (raw='{node.raw_value}') {line_info}"
+        specific_info = f": {node.value}"
     elif isinstance(node, StringLiteral):
-        node_repr = f"StringLiteral: {repr(node.value)} {line_info}"
+        specific_info = f": {repr(node.value)}"
     elif isinstance(node, CharLiteral):
-        node_repr = f"CharLiteral: {repr(node.value)} {line_info}"
+        specific_info = f": {repr(node.value)}"
+    elif isinstance(node, BooleanLiteral):
+        specific_info = f": {node.value}"
+    elif isinstance(node, NullPtrLiteral):
+        pass
     elif isinstance(node, BinaryOp):
-        node_repr = f"BinaryOp: '{node.op}' {line_info}"
-        children = [("left", node.left), ("right", node.right)]
+        specific_info = f": '{node.op}'";
+        children_info = [("left", node.left), ("right", node.right)]
     elif isinstance(node, UnaryOp):
-        op_display = node.op
-        operand_val = node.operand
+        op_display = node.op;
+        operand_val = node.operand;
         is_sizeof_type = op_display == 'sizeof' and isinstance(
             operand_val,
-            str)
-        op_prefix = "type" if is_sizeof_type else "operand"
-        node_repr = f"UnaryOp: '{op_display}' {line_info}"
-        children = [
+            str);
+        op_prefix = "type" if is_sizeof_type else "operand";
+        specific_info = f": '{op_display}'";
+        children_info = [
             (op_prefix, operand_val)]
     elif isinstance(node, CallExpression):
-        node_repr = f"CallExpression {line_info}"
-        children = [("function", node.function), ("arguments", node.args)]
+        children_info = [("function_expr", node.function), ("arguments", node.args)]
     elif isinstance(node, ArraySubscript):
-        node_repr = f"ArraySubscript {line_info}"
-        children = [("array", node.array_expression),
-                    ("index", node.index_expression)]
+        children_info = [("array_expr", node.array_expression), ("index_expr", node.index_expression)]
     elif isinstance(node, MemberAccess):
-        op = '->' if node.is_pointer_access else '.'
-        node_repr = f"MemberAccess: {op}{node.member_identifier.name} {line_info}"
-        children = [
-            ("object", node.object_or_pointer_expression), ("memberId", node.member_identifier)]
-    # --- <<< Handle CastExpression >>> ---
+        op = '->' if node.is_pointer_access else '.';
+        specific_info = f": {op}{node.member_identifier.name}";
+        children_info = [
+            ("object_expr", node.object_or_pointer_expression), ("member_id", node.member_identifier)]
     elif isinstance(node, CastExpression):
-        node_repr = f"CastExpression: (to type='{node.target_type}') {line_info}"
-        children = [
-            ("expression", node.expression)]
-    # --- <<< End Handle CastExpression >>> ---
-    elif isinstance(node, ASTNode):  # Fallback for other potential AST nodes
-        node_repr = f"{type(node).__name__} {line_info}"
-        children = [(attr, v) for attr, v in vars(node).items() if isinstance(v, (ASTNode, list))]  # Basic inspection
-    elif isinstance(node, str):  # Handle simple string children (like sizeof type operand)
-        print(f"{indent}{connector}{prefix}String: '{node}'")
-        return
-    else:  # Handle other unexpected types
-        print(f"{indent}{connector}{prefix}{repr(node)}")
-        return
-
-    # Add prototype parameters if they exist
-    if hasattr(node, 'is_prototype') and node.is_prototype and hasattr(node, 'prototype_params'):
-        children.append(("prototype_params", node.prototype_params))
-
-    # Print the current node line
+        specific_info = f": (to type='{node.target_type}')";
+        children_info = [("expression", node.expression)]
+    elif isinstance(node, TernaryOp):
+        node_type_name = "TernaryOp";
+        children_info = [("condition", node.condition),
+                         ("true_expr", node.true_expression),
+                         ("false_expr", node.false_expression)]
+    elif isinstance(node, ASTNode):
+        pass
+    if hasattr(node, 'is_prototype') and node.is_prototype and hasattr(node, 'prototype_params'): children_info.append(
+        ("prototype_params", node.prototype_params))
+    node_repr = f"{node_type_name}{specific_info}{loc_info}"
     print(f"{indent}{connector}{prefix}{node_repr}")
-
-    # Prepare and print children
-    new_indent = indent + ('    ' if last else '│   ')
-    valid_children = []
-    for child_prefix, child_node_or_list in children:
+    valid_children_to_print = [(name, child) for name, child in children_info if child is not None]
+    child_count = len(valid_children_to_print)
+    for i, (child_name, child_node_or_list) in enumerate(valid_children_to_print):
+        is_last_child = (i == child_count - 1);
+        current_child_prefix = f"{child_name}: " if child_name else ""
+        new_indent = indent + ('    ' if is_last_child else '│   ')
         if isinstance(child_node_or_list, list):
-            # Filter out None items from lists (e.g., optional else branch)
-            items = [item for item in child_node_or_list if item is not None]
-            if items:  # Only add if list is not empty after filtering
-                valid_children.append((child_prefix, items, True))
-        elif child_node_or_list is not None:
-            # Add single non-None children
-            valid_children.append((child_prefix, child_node_or_list, False))
-
-    child_count = len(valid_children)
-    for i, (child_prefix, child_node_or_list, is_list) in enumerate(valid_children):
-        is_last_child = (i == child_count - 1)
-        current_prefix = f"{child_prefix}: " if child_prefix else ""  # Add prefix like 'body: '
-        if is_list:  # Handle lists of children
-            num_items = len(child_node_or_list)
-            list_prefix = f"{child_prefix or 'items'}"  # Default prefix if none provided
-            # Print list header
+            actual_list_items = [item for item in child_node_or_list if item is not None];
+            num_actual_items = len(actual_list_items)
+            list_label = f"[{num_actual_items} item(s)]" if num_actual_items > 0 else "[empty list]"
+            print(f"{new_indent}{'└── ' if is_last_child else '├── '}{current_child_prefix}{list_label}")
+            if num_actual_items > 0:
+                list_items_indent = new_indent + ('    ' if is_last_child else '│   ')
+                for j, item in enumerate(actual_list_items): is_last_item_in_list = (
+                        j == num_actual_items - 1); item_prefix_in_list = f"[{j}]: "; print_ast_tree(item,
+                                                                                                     indent=list_items_indent,
+                                                                                                     last=is_last_item_in_list,
+                                                                                                     prefix=item_prefix_in_list)
+        elif isinstance(child_node_or_list, ASTNode):
+            print_ast_tree(child_node_or_list, indent=new_indent, last=is_last_child, prefix=current_child_prefix)
+        elif isinstance(child_node_or_list, str):
+            print(f"{new_indent}{'└── ' if is_last_child else '├── '}{current_child_prefix}'{child_node_or_list}'")
+        else:
             print(
-                f"{new_indent}{'└── ' if is_last_child else '├── '}{current_prefix}[List: {list_prefix}, {num_items} item(s)]")
-            # Print items in the list
-            list_indent = new_indent + ('    ' if is_last_child else '│   ')
-            for j, item in enumerate(child_node_or_list):
-                is_last_item = (j == num_items - 1)
-                item_prefix = f"[{j}]: "  # Prefix for list items
-                print_ast_tree(item, indent=list_indent, last=is_last_item, prefix=item_prefix)
-        elif isinstance(child_node_or_list, ASTNode):  # Handle single ASTNode child
-            print_ast_tree(child_node_or_list, indent=new_indent, last=is_last_child, prefix=current_prefix)
-        else:  # Handle simple string child (like sizeof type)
-            print(f"{new_indent}{'└── ' if is_last_child else '├── '}{current_prefix}{repr(child_node_or_list)}")
+                f"{new_indent}{'└── ' if is_last_child else '├── '}{current_child_prefix}UnknownChild: {repr(child_node_or_list)}")
 
 
+# --- 主执行块 (__main__) ---
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(f"用法: python parser.py <input_file.cpp>", file=sys.stderr)
-        sys.exit(1)
-
-    input_file_path = sys.argv[1]
-    raw_code = None
-    processed_code = None
-    tokens = None
-    ast = None
-    line_map = {}
-    had_errors = False
+    # (与上一版本相同)
+    if len(sys.argv) != 2: print(f"用法: python parser.py <input_file.cpp>", file=sys.stderr); sys.exit(1)
+    input_file_path = sys.argv[1];
+    raw_code = None;
+    processed_code = None;
+    tokens = None;
+    ast = None;
+    line_map = {};
+    had_errors = False;
     is_effectively_empty = False
-
-    # Stages 1, 2, 3 (Reading, Preprocessing, Lexing) remain the same as provided previously...
-    # --- Stage 1: Reading File ---
     try:
-        print(f"--- Stage 1: Reading File ---")
+        print(f"--- Stage 1: Reading File ---");
         print(f"Reading file: {input_file_path}")
         with open(input_file_path, 'r', encoding='utf-8') as infile:
             raw_code = infile.read()
         print("File reading complete.")
     except FileNotFoundError:
-        print(f"Error: File '{input_file_path}' not found.", file=sys.stderr)
+        print(f"Error: File '{input_file_path}' not found.", file=sys.stderr);
         had_errors = True
     except Exception as e:
-        print(f"Error reading file: {e}", file=sys.stderr)
+        print(f"Error reading file: {e}", file=sys.stderr);
         had_errors = True
+    if had_errors: sys.exit(1)
+    try:
+        print(f"\n--- Stage 2: Preprocessing ---");
+        from preprocess import BasicPreprocessor;
 
-    # --- Stage 2: Preprocessing (Optional) ---
-    if not had_errors:
-        try:
-            print(f"\n--- Stage 2: Preprocessing ---")
-            from preprocess import BasicPreprocessor
-
-            print("Running preprocessor...")
-            preprocessor = BasicPreprocessor()
-            processed_code, line_map = preprocessor.process(raw_code)
-            print("Preprocessing complete.")
-            # Optionally print processed code and map
-        except ImportError:
-            print("Warning: preprocess.py not found. Skipping preprocessing stage.")
-            processed_code = raw_code
-            num_lines = raw_code.count('\n') + 1
-            line_map = {i: i for i in range(1, num_lines + 1)}
-        except Exception as e:
-            print(f"Error during preprocessing: {e}. Using raw code.", file=sys.stderr)
-            processed_code = raw_code
-            num_lines = raw_code.count('\n') + 1
-            line_map = {i: i for i in range(1, num_lines + 1)}
-
-    # --- Stage 3: Lexical Analysis ---
-    token_list = []  # Ensure token_list is defined
+        print("Running preprocessor...")
+        preprocessor = BasicPreprocessor();
+        processed_code, line_map = preprocessor.process(raw_code);
+        print("Preprocessing complete.")
+    except ImportError:
+        print(
+            "Warning: preprocess.py not found. Skipping preprocessing stage.");
+        processed_code = raw_code;
+        num_lines = raw_code.count(
+            '\n') + 1;
+        line_map = {i: i for i in range(1, num_lines + 1)}
+    except Exception as e:
+        print(f"Error during preprocessing: {e}. Using raw code.",
+              file=sys.stderr);
+        processed_code = raw_code;
+        num_lines = raw_code.count('\n') + 1;
+        line_map = {i: i for i
+                    in range(1,
+                             num_lines + 1)}
+    token_list = []
     if not had_errors and processed_code is not None:
         try:
-            print(f"\n--- Stage 3: Lexical Analysis ---")
+            print(f"\n--- Stage 3: Lexical Analysis ---");
             print("Starting lexical analysis...")
-            lexer = Lexer(processed_code, line_map)  # Pass line map
-            token_list = list(lexer.tokenize())  # Store as list
+            lexer = Lexer(processed_code, line_map);
+            token_list = list(lexer.tokenize())
             print(f"Lexical analysis complete. Generated {len(token_list)} tokens.")
+            logging.debug(f"First 50 tokens: {token_list[:50]}")
         except LexerError as e:
-            print(e, file=sys.stderr)
+            print(e, file=sys.stderr);
             had_errors = True
         except Exception as e:
-            print(f"Unexpected Lexer Error: {e}", file=sys.stderr)
-            import traceback
+            print(f"Unexpected Lexer Error: {e}", file=sys.stderr);
+            import \
+                traceback;
 
-            traceback.print_exc()
+            traceback.print_exc();
             had_errors = True
-
-    # --- Stage 4: Syntax Analysis (Parsing) ---
     if not had_errors:
-        # Check if token list is effectively empty (only EOF or nothing)
         is_effectively_empty = not token_list or (len(token_list) == 1 and token_list[0].type == 'EOF')
         if is_effectively_empty:
-            print("\nInput is effectively empty after lexing. Creating empty Program AST.")
-            ast = Program([])  # Handle empty input gracefully
+            print("\nInput is effectively empty. Creating empty Program AST.");
+            ast = Program([])
         else:
             try:
-                print(f"\n--- Stage 4: Syntax Analysis (Parsing) ---")
+                print(f"\n--- Stage 4: Syntax Analysis (Parsing) ---");
                 print("Starting syntax analysis...")
-                # Pass the list (or an iterator of it) to the parser
-                parser = Parser(iter(token_list))  # Pass iterator
-                ast = parser.parse_program()  # Attempt parsing
+                parser = Parser(iter(token_list));
+                ast = parser.parse_program()
                 print("\n--- Abstract Syntax Tree (Generated by Parser) ---")
-                # Use the defined print_ast_tree function
-                print_ast_tree(ast) if ast else print("AST generation failed.")
-                print("-------------------------------------------------")
+                if ast:
+                    print_ast_tree(ast)
+                else:
+                    if parser.current_token is None or parser.current_token.type == "EOF":
+                        print("Parsing resulted in an empty AST.")
+                    else:
+                        print("AST generation failed.");
+                        had_errors = True
+                print("-------------------------------------------------");
                 print("Syntax analysis complete.")
-                # If parser returns None for non-empty input, it's an error
-                if ast is None:
-                    print("Error: Syntax analysis failed to produce an AST for non-empty input.", file=sys.stderr)
-                    had_errors = True
-
             except ParseError as final_e:
-                # Error message should have been printed by parser._error
-                print(f"Syntax analysis failed.", file=sys.stderr)  # Simple final message
+                print(f"\nSyntax analysis failed.", file=sys.stderr);
                 had_errors = True
             except Exception as e:
-                print(f"Unexpected error during syntax analysis: {e}", file=sys.stderr)
-                import traceback
+                print(f"\nUnexpected error during syntax analysis: {e}", file=sys.stderr);
+                import \
+                    traceback;
 
-                traceback.print_exc()
+                traceback.print_exc();
                 had_errors = True
-    elif not had_errors and not token_list:  # Handle case where lexer produced no tokens
-        print("\nLexer produced no tokens. Skipping parsing.")
-        is_effectively_empty = True
-        ast = Program([])  # Treat as empty program
-
-    # --- Final Summary ---
+    elif not had_errors and not token_list:
+        print("\nLexer produced no tokens.");
+        ast = Program([])
     print("\n--- Compilation Summary ---")
     if had_errors:
-        print("Compilation failed due to errors in Lexing or Parsing.")
+        print("Compilation failed due to errors.");
         sys.exit(1)
     else:
-        print("Parsing completed successfully (Lexing and Parsing stages).")
-        # You would typically proceed to semantic analysis here if parsing succeeded.
-        print("(Semantic Analysis stage would run next)")
+        print("Parsing completed successfully.");
         sys.exit(0)

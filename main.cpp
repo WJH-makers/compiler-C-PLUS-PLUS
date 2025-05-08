@@ -16,6 +16,14 @@ void printMessage(const char* msg) {
     cout << "[消息]" << msg << endl;
 }
 
+int pow(int base, int exp) {
+    int result = 1;
+    for (int i = 0; i < exp; i++) {
+        result *= base;
+    }
+    return result;
+}
+
 string to_string(int num) {
     string str_num="";
     int ori=num;
@@ -25,7 +33,7 @@ string to_string(int num) {
         num = -num;
     }
     if(num==0){
-        return '0';
+        return "0";
     }
     while(num!=0){
         digit++;
@@ -33,8 +41,8 @@ string to_string(int num) {
     }
     num=ori;
     while(digit!=0){
-        str_num+=(char)(num/(10^(digit-1))+'0');
-        num-=(num/(10^(digit-1)))*(10^(digit-1));
+        str_num+=(char)(num/pow(10,digit-1)+'0');
+        num-=(num/(10^(digit-1)))*pow(10,digit-1);
         digit--;
     }
     return str_num;
