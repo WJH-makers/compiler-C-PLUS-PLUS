@@ -9,16 +9,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 # --- 导入依赖与占位符 ---
 try:
     # Ensure these are correctly defined in compiler_ast.py
-    from compiler_ast import (
-        ASTNode, Program, FunctionDefinition, Parameter, CompoundStatement,
-        DeclarationStatement, AssignmentStatement, ExpressionStatement,
-        IfStatement, WhileStatement, ForStatement, DoWhileStatement,
-        BreakStatement, ContinueStatement, ReturnStatement, Identifier,
-        IntegerLiteral, FloatLiteral, StringLiteral, CharLiteral,
-        BinaryOp, UnaryOp, CallExpression, ArraySubscript, MemberAccess,
-        CastExpression, BooleanLiteral, NullPtrLiteral, TernaryOp  # Ensure defined
-    )
-    # Ensure lexer.py with corrected comma classification is used
+    from compiler_ast import *
     from lexer import LexerError, Lexer
 except ImportError as e:
     print(f"错误：无法导入所需的模块 (compiler_ast, lexer)。请确保它们存在且路径正确。\n{e}", file=sys.stderr)

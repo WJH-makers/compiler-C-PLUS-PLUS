@@ -104,8 +104,6 @@ class Lexer:
             # 不匹配任何规则的字符
             ('MISMATCH', r'.')
         ]
-        # --- <<< 修正结束 >>> ---
-        # 编译主正则表达式
         self.master_regex = re.compile('|'.join(f'(?P<{name}>{pattern})' for name, pattern in self.token_specs),
                                        re.DOTALL)
 

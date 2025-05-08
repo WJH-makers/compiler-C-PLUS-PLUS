@@ -42,7 +42,7 @@ string to_string(int num) {
     num=ori;
     while(digit!=0){
         str_num+=(char)(num/pow(10,digit-1)+'0');
-        num-=(num/(10^(digit-1)))*pow(10,digit-1);
+        num-=(num/pow(10,digit-1))*pow(10,digit-1);
         digit--;
     }
     return str_num;
@@ -66,4 +66,3 @@ int main() {
     printMessage("程序结束");
     return 0;
 }
-
