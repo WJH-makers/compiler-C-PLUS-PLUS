@@ -1315,7 +1315,6 @@ if __name__ == "__main__":
                 print_annotated_ast(ast)
                 print("---------------------------")
             else:
-                # analyzer.analyze 已经打印了错误数量
                 had_errors = True
         except Exception as e:
             print(f"意外的语义分析错误: {e}", file=sys.stderr)

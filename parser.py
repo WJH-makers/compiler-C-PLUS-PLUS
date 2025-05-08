@@ -13,7 +13,6 @@ except ImportError as e:
     print(f"错误：无法导入所需的模块 (compiler_ast, lexer)。请确保它们存在且路径正确。\n{e}", file=sys.stderr)
     sys.exit(1)
 
-
 cpp_declaration_starters = [
     "alignas", "auto", "bool", "char", "class", "const", "consteval",
     "constexpr", "constinit", "decltype", "double", "enum", "extern",
@@ -737,7 +736,6 @@ class Parser:
                 break  # No more postfix operators matched
         return expr
 
-
     def _parse_primary_expression(self):
         token = self.current_token
         if not token or token.type == "EOF": self._error("Unexpected EOF expecting primary expression",
@@ -803,7 +801,6 @@ class Parser:
             self._error(f"Unexpected token, expected primary expression", token=token)
             return None
         return node
-
 
 
 def print_ast_tree(node, indent="", last=True, prefix=""):
@@ -1039,3 +1036,187 @@ if __name__ == "__main__":
     else:
         print("Parsing completed successfully.")
         sys.exit(0)
+
+"""
+1. 顶层结构 (Program)
+
+代码段
+
+Program -> TopLevelItem* EOF
+TopLevelItem -> ExternalDeclaration
+              | UsingDirective
+              | EmptyStatement
+EmptyStatement -> ';'
+UsingDirective -> 'using' 'namespace' IDENTIFIER ';'
+parse_program 方法实现了这里的逻辑。
+ExternalDeclaration 由 _parse_external_declaration 解析。
+
+
+
+2. 外部声明 (ExternalDeclaration) - 函数定义或全局变量
+
+代码段
+
+ExternalDeclaration -> Type Declarator ExternalDeclSuffix
+
+Declarator -> '*' Declarator
+            | Identifier
+
+ExternalDeclSuffix -> '(' ParameterList ')' FunctionSuffix
+                    | ('=' AssignmentExpression)? ';'
+
+FunctionSuffix -> CompoundStatement
+                | ';'
+_parse_external_declaration 方法实现了这里的逻辑。
+注意这里对 Declarator 的简化，实际 C++ 文法更复杂。
+
+
+
+3. 类型 (Type)
+
+代码段
+
+Type -> TypeSpecifier TypeQualifier*
+      | 'std' '::' TypeSpecifier TypeQualifier* // 简化的 std:: 类型
+TypeSpecifier -> 'int' | 'float' | 'char' | 'bool' | 'void' | 'string' | ClassName | EnumName | StructName | UnionName // 基于 cpp_declaration_starters 和识别 std:: 后面的类型
+TypeQualifier -> 'const' | 'volatile' // 示例，可能还有其他限定符，此处未完全从代码中提取
+_parse_type 方法实现了这里的逻辑，主要识别 cpp_declaration_starters 中的关键字和 std:: 后跟这些关键字的情况。
+
+
+
+4. 复合语句 (CompoundStatement) - 代码块 {}
+
+代码段
+
+CompoundStatement -> '{' Statement* '}'
+_parse_compound_statement 方法实现了这里的逻辑。
+
+
+
+5. 语句 (Statement)
+
+代码段
+
+Statement -> DeclarationStatement
+           | CompoundStatement
+           | IfStatement
+           | WhileStatement
+           | ForStatement
+           | DoWhileStatement
+           | ReturnStatement
+           | BreakStatement
+           | ContinueStatement
+           | ExpressionStatement
+           | EmptyStatement // ';'
+_parse_statement 方法通过检查当前 token 类型来决定调用哪个具体的解析方法。
+EmptyStatement 和 CompoundStatement 在 _parse_statement 中直接处理或调用子方法。
+
+
+
+6. 声明语句 (DeclarationStatement) - 局部变量
+
+代码段
+
+DeclarationStatement -> Type Declarator (Initializer)? ';'
+
+Initializer -> '=' AssignmentExpression
+             | BraceInitializer
+
+BraceInitializer -> '{' AssignmentExpression '}' // 简化，实际 C++ 列表初始化更复杂
+_parse_declaration_statement 方法实现了这里的逻辑。
+
+
+
+7. 控制流语句
+
+代码段
+
+IfStatement -> 'if' '(' Expression ')' Statement ('else' Statement)?
+WhileStatement -> 'while' '(' Expression ')' Statement
+ForStatement -> 'for' '(' (DeclarationStatementWithoutSemi | Expression?) ';' Expression? ';' Expression? ')' Statement
+DoWhileStatement -> 'do' Statement 'while' '(' Expression ')' ';'
+ReturnStatement -> 'return' Expression? ';'
+BreakStatement -> 'break' ';'
+ContinueStatement -> 'continue' ';'
+
+DeclarationStatementWithoutSemi -> Type Declarator (Initializer)? // 用于 for 循环初始化部分
+对应的 _parse_if_statement, _parse_while_statement, _parse_for_statement, _parse_do_while_statement, _parse_return_statement 方法实现了这些规则。
+
+
+
+8. 表达式 (Expression)
+
+表达式的解析通常涉及运算符优先级和结合性。解析器使用了基于优先级的解析方法（如 Pratt Parsing 或 Shunting-yard 的变体），这在产生式中难以直接完全表示优先级和结合性，但我们可以大致写出表达式的结构。
+
+代码段
+
+AssignmentExpression -> Expression (min_precedence = 1)
+
+Expression -> UnaryExpression (BinaryOperator UnaryExpression | TernaryOperatorSuffix)*
+BinaryOperator -> '+' | '-' | '*' | '/' | '%' | '=' | '+=' | ... // 优先级在代码中定义 (PRECEDENCE)
+TernaryOperatorSuffix -> '?' Expression ':' Expression
+
+UnaryExpression -> PrefixUnaryOperator UnaryExpression
+                 | 'sizeof' SizeofOperand
+                 | PostfixExpression
+PrefixUnaryOperator -> '+' | '-' | '!' | '~' | '++' | '--' | '*' | '&'
+
+SizeofOperand -> '(' Type '*' * ')'
+               | UnaryExpression
+
+PostfixExpression -> PrimaryExpression PostfixOperator*
+PostfixOperator -> CallSuffix
+                 | ArraySubscriptSuffix
+                 | MemberAccessSuffix
+                 | PostfixIncrementOperator
+                 | PostfixDecrementOperator
+
+CallSuffix -> '(' ArgumentList ')'
+ArraySubscriptSuffix -> '[' Expression ']'
+MemberAccessSuffix -> '.' Identifier
+                    | '->' Identifier
+PostfixIncrementOperator -> '++'
+PostfixDecrementOperator -> '--'
+_parse_expression, _parse_assignment_expression, _parse_unary_expression, _parse_postfix_expression 方法实现了这些规则。
+
+
+
+9. 基本表达式 (PrimaryExpression)
+
+代码段
+
+PrimaryExpression -> Literal
+                   | Identifier
+                   | ParenthesizedExpression
+                   | CastExpression
+
+Literal -> INTEGER_LITERAL
+         | FLOAT_LITERAL
+         | STRING_LITERAL
+         | CHAR_LITERAL
+         | 'true'
+         | 'false'
+         | 'nullptr'
+
+Identifier -> IDENTIFIER
+
+ParenthesizedExpression -> '(' Expression ')'
+
+CastExpression -> '(' Type '*' * ')' UnaryExpression // C 风格强制类型转换
+_parse_primary_expression 方法实现了这些规则。
+
+
+
+10. 参数列表 (ParameterList) 和实参列表 (ArgumentList)
+
+代码段
+
+ParameterList -> /* empty */ // For ()
+               | 'void' // For (void)
+               | Parameter (',' Parameter)* (',' '...')? // Note: ',' '...' is only allowed at the end
+Parameter -> Type Declarator? // Note: Declarator here is typically just an Identifier or pointer specifier
+
+ArgumentList -> /* empty */ // For ()
+              | AssignmentExpression (',' AssignmentExpression)*
+_parse_parameter_list 和 _parse_argument_list 方法实现了这些规则。
+"""

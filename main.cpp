@@ -28,12 +28,12 @@ string to_string(int num) {
     string str_num="";
     int ori=num;
     int digit=0; // 记录数字的位数
-    if(num<0){
+    if(num<=0){
+        if(num==0){
+            return "0";
+        }
         str_num += '-';
         num = -num;
-    }
-    if(num==0){
-        return "0";
     }
     while(num!=0){
         digit++;

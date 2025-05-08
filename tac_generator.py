@@ -3,7 +3,6 @@
 import logging
 import sys
 
-# 确保这些模块在您的项目中可用且路径正确
 from lexer import Lexer, LexerError
 from parser import Parser, ParseError
 from preprocess import BasicPreprocessor
