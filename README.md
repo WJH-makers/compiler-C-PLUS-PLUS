@@ -2,13 +2,13 @@
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=180&section=header&text=C%2B%2B%20Subset%20Compiler&fontSize=55&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Python-based%20Compiler%20%E2%80%93%20Lexer%20%E2%86%92%20Parser%20%E2%86%92%20AST%20%E2%86%92%20Semantic%20Analysis%20%E2%86%92%20TAC&descAlignY=55&descAlign=50" width="100%" />
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Language-Python%203-3776AB?style=flat-square&logo=python" />
-  <img src="https://img.shields.io/badge/Target-C%2B%2B%20Subset-00599C?style=flat-square&logo=c%2B%2B" />
-  <img src="https://img.shields.io/badge/Parsing-Recursive%20Descent-00A1E9?style=flat-square" />
-  <img src="https://img.shields.io/badge/IR-Three%20Address%20Code-FF6F00?style=flat-square" />
-  <img src="https://img.shields.io/badge/Status-Complete-green?style=flat-square" />
-</p>
+| Category | Stack |
+|----------|-------|
+| **Language** | Python 3.7+ |
+| **Parsing** | Recursive descent, hand-written |
+| **IR** | Three-Address Code (quadruples) |
+| **Target** | C++17 subset |
+| **Dependencies** | None (pure Python) |
 
 ## 📋 Overview
 
@@ -36,11 +36,6 @@ python parser.py < preprocessed.cpp
 python semantic_analyzer.py < preprocessed.cpp
 python tac_generator.py < preprocessed.cpp
 ```
-
-### Requirements
-
-- Python 3.7+
-- No external dependencies (pure Python)
 
 ## ✨ Key Features
 
@@ -94,6 +89,19 @@ Source Code (C++)
 | **Parser** | `parser.py` | Recursive descent with operator precedence for C++ (800+ lines) |
 | **Semantic Analyzer** | `semantic_analyzer.py` | Symbol table, type checking, const correctness (1000+ lines) |
 | **TAC Generator** | `tac_generator.py` | Three-address code via visitor pattern (748 lines) |
+
+## ❓ FAQ
+
+| Question | Answer |
+|----------|--------|
+| **Can this compile real-world C++ code?** | It handles a C++17 subset — no templates, exceptions, or RTTI. Designed for teaching, not production. |
+| **How do I add optimization passes?** | (1) Output TAC to a file (2) Implement passes like constant folding as a TAC-to-TAC transformation (3) Pipe before the final output. |
+| **Is there a way to visualize the AST?** | Parse the `compiler_ast.py` output with any AST visualizer, or add a `__repr__` for debug printing. |
+
+## 🔗 See Also
+
+- [xv6 OS](/WJH-makers/xv6-riscv-riscv) — Linker/loader concepts and the runtime environment
+- [RingMoE](/WJH-makers/RingMOE) — Computation graph compilation for deep learning at scale
 
 ## 🎓 Academic Context
 
