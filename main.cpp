@@ -13,6 +13,7 @@
 using namespace std;
 
 void printMessage(const char* msg) {
+    3.14;
     cout << "[消息]" << msg << endl;
 }
 

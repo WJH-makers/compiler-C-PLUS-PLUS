@@ -55,6 +55,7 @@ class BasicPreprocessor:
         """解析 #define 指令"""
         # （此函数内部逻辑未改变）
         match_simple = re.match(r'#define\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(.*)', line)
+        match_no_value = re.match(r'#define\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', line)
         match_func = re.match(r'#define\s+([a-zA-Z_][a-zA-Z0-9_]*)\((.*?)\)\s*(.*)', line)
         if match_func:
             name = match_func.group(1)
@@ -68,6 +69,10 @@ class BasicPreprocessor:
             value = match_simple.group(2).strip()
             logging.debug(f"定义对象式宏: {name} = '{value}'")
             self.macros[name] = Macro(name, value, is_function_like=False)
+        elif match_no_value:
+            name = match_no_value.group(1)
+            logging.debug(f"定义对象式宏: {name} = ''")
+            self.macros[name] = Macro(name, '', is_function_like=False)
         else:
             # 在抛出错误前记录行内容可能有助于调试
             logging.error(f"无法解析的 #define 语句: {line}")
@@ -100,8 +105,14 @@ class BasicPreprocessor:
 
         evaluated_str = self._apply_object_macros(condition_str)
         logging.debug(f"应用对象宏后: '{evaluated_str}'")
+        import ast
         try:
-            result = eval(evaluated_str, {"__builtins__": None}, {})
+            tree = ast.parse(evaluated_str, mode='eval')
+            allowed_nodes = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.Name, ast.BoolOp, ast.Compare, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.Gt, ast.LtE, ast.GtE, ast.USub, ast.UAdd, ast.Invert)
+            for node in ast.walk(tree):
+                if not isinstance(node, allowed_nodes):
+                    raise ValueError("Unsafe expression")
+            result = eval(compile(tree, '<string>', 'eval'), {"__builtins__": {}}, {"defined": lambda x: x in self.macros})
             is_true = bool(result)
             logging.debug(f"条件表达式 '{condition_str}' ('{evaluated_str}') 评估结果: {result} -> {is_true}")
             return is_true
@@ -345,8 +356,8 @@ class BasicPreprocessor:
                         last_pos = arg_list_end + 1
                     else:
                         expansion = macro.value
-                        for param_name, provided_arg in reversed(list(zip(macro.args, args))):
-                            expansion = expansion.replace(param_name, provided_arg)
+                        for param_name, provided_arg in sorted(zip(macro.args, args), key=lambda x: len(x[0]), reverse=True):
+                            expansion = re.sub(r'\b' + re.escape(param_name) + r'\b', provided_arg, expansion)
                         logging.debug(f"展开 '{call_str}' 为 '{expansion}'")
                         result_line += current_line[last_pos:start_index]
                         result_line += expansion

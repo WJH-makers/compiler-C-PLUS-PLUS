@@ -201,7 +201,6 @@ def type_compatible(target_type, value_type, allow_numeric_conv=True, assignment
     # --- Rule: Allow char*/const char*/char assignment TO string ---
     # Handles: string s = "literal"; string s += 'a'; string s += some_char_var;
     if assignment_context and target_type == 'string':
-        # <<< MODIFICATION: Added 'char' to the list >>>
         if value_type in ['char*', 'const char*', 'char']:
             logging.debug(f"Allowing assignment/append: '{value_type}' -> '{target_type}'")
             return True
@@ -414,7 +413,6 @@ class SemanticAnalyzer:
             return "error_type"
 
         # --- 操作符特定逻辑 ---
-
         # 赋值操作符 (=, +=, -=, etc.)
         if op in ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=']:
             # 检查左操作数是否是有效的左值
@@ -718,6 +716,15 @@ class SemanticAnalyzer:
                     return "error_type"
                 expected_param_defs = func_symbol.params
                 expected_return_type = func_symbol.return_type
+                if expected_param_defs is not None and isinstance(expected_param_defs, list):
+                    if len(arg_types) != len(expected_param_defs):
+                        self.error(f"Function '{func_name}' expects {len(expected_param_defs)} argument(s), but got {len(arg_types)}", node)
+                        return "error_type"
+                    for i, (arg_type, param_def) in enumerate(zip(arg_types, expected_param_defs)):
+                        param_type = param_def.type if isinstance(param_def, Symbol) else param_def
+                        if arg_type != "error_type" and not type_compatible(param_type, arg_type, assignment_context=True, node_for_value=node.args[i]):
+                            self.error(f"Function '{func_name}' argument {i + 1}: cannot convert '{arg_type}' to '{param_type}'", node.args[i])
+                            return "error_type"
                 # setattr(func_expr_node, 'semantic_type', func_symbol.type) # Annotate identifier if needed
             except SemanticError:
                 return "error_type"
@@ -885,6 +892,15 @@ class SemanticAnalyzer:
                         f"Redefinition of function '{func_name}' (previous definition at L{existing_symbol.node.line})",
                         node)
                 else:
+                    if existing_symbol.params is not None and len(existing_symbol.params) > 0:
+                        proto_params = existing_symbol.params
+                        if len(node.params) != len(proto_params):
+                            self.error(f"Parameter count mismatch for function '{func_name}': prototype has {len(proto_params)} parameter(s), definition has {len(node.params)}", node)
+                        else:
+                            for i, (def_param, proto_param) in enumerate(zip(node.params, proto_params)):
+                                proto_type = proto_param.param_type if hasattr(proto_param, 'param_type') else (proto_param.type if isinstance(proto_param, Symbol) else str(proto_param))
+                                if def_param.param_type != proto_type:
+                                    self.error(f"Parameter {i + 1} type mismatch for function '{func_name}': prototype expects '{proto_type}', definition has '{def_param.param_type}'", def_param)
                     logging.info(f"Defining function '{func_name}'.")
                 func_symbol = existing_symbol
                 func_symbol.node = node

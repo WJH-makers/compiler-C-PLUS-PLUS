@@ -130,7 +130,7 @@ class Lexer:
             ('NEWLINE', r'\n'),  # 换行符
             ('WHITESPACE', r'[ \t\r\f\v]+'),  # 空白符
             # 原始字符串 R"(...)"
-            ('RAW_STRING_LITERAL', r'R"((?P<delim>[^()\s]{0,16}))\((?P<content>.*?)\)\1"'),
+            ('RAW_STRING_LITERAL', r'R"((?P<delim>[^()\s\\]{0,16}))\((?P<content>(?:[^)\\]|\\.|(?:(?!\)(?P=delim)).))*)\)\1"'),
             # 字符字面量 'c', L'c', u'c', U'c', u8'c'
             ('CHAR_LITERAL', r'(u8|[uUL])?\'([^\\\'\n]|\\([nrtv\\\'\"?abf0]|x[0-9a-fA-F]+|[0-7]{1,3}))+\''),
             # 允许多个字符或转义序列
@@ -279,7 +279,6 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("用法: python lexer.py <input_file.cpp>")
         sys.exit(1)
-
     input_file_path = sys.argv[1]
     raw_code = None
     processed_code = None
@@ -288,8 +287,7 @@ if __name__ == "__main__":
         logging.info(f"正在读取文件: {input_file_path}")
         with open(input_file_path, 'r', encoding='utf-8') as infile:
             raw_code = infile.read()
-        # --- 可选的预处理步骤 ---
-        if BasicPreprocessor:  # 检查预处理器是否成功导入
+        if BasicPreprocessor:
             try:
                 logging.info("正在尝试运行预处理器...")
                 preprocessor = BasicPreprocessor()
@@ -297,10 +295,10 @@ if __name__ == "__main__":
                 logging.info("预处理完成.")
             except Exception as e:
                 logging.error(f"预处理时发生错误: {e}。将对原始代码进行词法分析。", exc_info=True)
-                processed_code = raw_code  # 出错则回退到原始代码
+                processed_code = raw_code
                 num_lines = raw_code.count('\n') + 1
-                line_map = {i: i for i in range(1, num_lines + 1)}  # 基础行号映射
-        else:  # 没有预处理器
+                line_map = {i: i for i in range(1, num_lines + 1)}
+        else:
             logging.warning("未找到预处理器，将直接对原始代码进行词法分析。")
             processed_code = raw_code
             num_lines = raw_code.count('\n') + 1
@@ -313,7 +311,7 @@ if __name__ == "__main__":
             logging.info("词法分析完成.")
             print("\n词法分析结果 (Tokens):")
             for token in tokens:
-                print(token)  # 打印每个 token
+                print(token)
         else:
             logging.error("错误：没有可供词法分析的代码。")
             sys.exit(1)
@@ -321,8 +319,8 @@ if __name__ == "__main__":
         logging.error(f"错误: 文件 '{input_file_path}' 未找到")
         sys.exit(1)
     except LexerError as e:
-        logging.error(e)  # 打印词法错误
+        logging.error(e)
         sys.exit(1)
-    except Exception as e:  # 捕获其他意外错误
+    except Exception as e:
         logging.error(f"发生未预料的错误: {e}", exc_info=True)
         sys.exit(1)

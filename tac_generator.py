@@ -338,20 +338,41 @@ class TACGenerator:
                 log.error(f"复杂左值 '{type(node.left).__name__}' 的赋值 TAC 尚未完全实现。")
                 return None
         elif op in ['+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=']:
-            if not isinstance(node.left, Identifier):  # 简化：只处理简单变量的复合赋值
-                log.error(f"复合赋值运算符 '{op}' 的左操作数必须是简单标识符 (当前 TAC 限制)。")
-                # 更完整的实现会像普通赋值一样处理复杂左值
-                return None
-            lhs_addr = self.visit(node.left)  # 得到变量名
             rhs_addr = self.visit(node.right)
-            if lhs_addr is None or rhs_addr is None:
-                log.error(f"复合赋值运算符 '{op}' 的操作数未能生成有效地址。")
+            if rhs_addr is None:
+                log.error(f"复合赋值运算符 '{op}' 的右侧表达式未生成有效地址。")
                 return None
-
             base_op = op[:-1]
-            self._emit(base_op, lhs_addr, lhs_addr, rhs_addr)  # x = x + y (如果指令可以直接修改第一个操作数)
-            # 或者用临时变量: t = x+y; x=t
-            return lhs_addr  # 复合赋值表达式的值是赋回后的值
+
+            if isinstance(node.left, Identifier):
+                lhs_addr = self.visit(node.left)
+                if lhs_addr is None:
+                    log.error(f"复合赋值运算符 '{op}' 的左侧表达式未生成有效地址。")
+                    return None
+                self._emit(base_op, lhs_addr, lhs_addr, rhs_addr)
+                return lhs_addr
+            elif isinstance(node.left, (ArraySubscript, MemberAccess)):
+                lvalue = self.visit_lvalue(node.left)
+                if lvalue is None:
+                    log.error(f"复合赋值运算符 '{op}' 的复杂左值未生成有效地址。")
+                    return None
+                t1 = self._new_temp()
+                if isinstance(node.left, ArraySubscript):
+                    self._emit('[]', t1, lvalue[0], lvalue[1])
+                else:
+                    op_fetch = '->' if node.left.is_pointer_access else '.'
+                    self._emit(op_fetch, t1, lvalue[0], lvalue[1])
+                t2 = self._new_temp()
+                self._emit(base_op, t2, t1, rhs_addr)
+                if isinstance(node.left, ArraySubscript):
+                    self._emit('=[]', lvalue[0], lvalue[1], t2)
+                else:
+                    op_store = '->=' if node.left.is_pointer_access else '.='
+                    self._emit(op_store, lvalue[0], lvalue[1], t2)
+                return t2
+            else:
+                log.error(f"复合赋值运算符 '{op}' 的左操作数类型 '{type(node.left).__name__}' 暂不支持。")
+                return None
         else:  # 其他二元运算符
             lhs_addr = self.visit(node.left)
             rhs_addr = self.visit(node.right)
@@ -384,6 +405,23 @@ class TACGenerator:
             # 假设操作数是变量名，可以直接修改
             if isinstance(node.operand, Identifier):
                 self._emit(base_op, node.operand.name, node.operand.name, 1)  # x = x +/- 1
+            elif isinstance(node.operand, (ArraySubscript, MemberAccess)):
+                lvalue = self.visit_lvalue(node.operand)
+                if lvalue is None:
+                    log.error(f"后缀 {op} 的复杂左值未生成有效地址。")
+                    return None
+                t1 = self._new_temp()
+                if isinstance(node.operand, ArraySubscript):
+                    self._emit('[]', t1, lvalue[0], lvalue[1])
+                else:
+                    op_fetch = '->' if node.operand.is_pointer_access else '.'
+                    self._emit(op_fetch, t1, lvalue[0], lvalue[1])
+                self._emit(base_op, t1, t1, 1)
+                if isinstance(node.operand, ArraySubscript):
+                    self._emit('=[]', lvalue[0], lvalue[1], t1)
+                else:
+                    op_store = '->=' if node.operand.is_pointer_access else '.='
+                    self._emit(op_store, lvalue[0], lvalue[1], t1)
             else:
                 # 如果操作数不是简单标识符，则需要更复杂的左值处理
                 log.error(f"后缀 {op} 的操作数不是简单标识符，TAC生成复杂。")
@@ -396,6 +434,24 @@ class TACGenerator:
             if isinstance(node.operand, Identifier):
                 self._emit(base_op, node.operand.name, node.operand.name, 1)  # x = x +/- 1
                 self._emit('=', dest_addr, node.operand.name)  # dest_addr = x (new value)
+            elif isinstance(node.operand, (ArraySubscript, MemberAccess)):
+                lvalue = self.visit_lvalue(node.operand)
+                if lvalue is None:
+                    log.error(f"前缀 {op} 的复杂左值未生成有效地址。")
+                    return None
+                t1 = self._new_temp()
+                if isinstance(node.operand, ArraySubscript):
+                    self._emit('[]', t1, lvalue[0], lvalue[1])
+                else:
+                    op_fetch = '->' if node.operand.is_pointer_access else '.'
+                    self._emit(op_fetch, t1, lvalue[0], lvalue[1])
+                self._emit(base_op, t1, t1, 1)
+                if isinstance(node.operand, ArraySubscript):
+                    self._emit('=[]', lvalue[0], lvalue[1], t1)
+                else:
+                    op_store = '->=' if node.operand.is_pointer_access else '.='
+                    self._emit(op_store, lvalue[0], lvalue[1], t1)
+                self._emit('=', dest_addr, t1)
             else:
                 log.error(f"前缀 {op} 的操作数不是简单标识符，TAC生成复杂。")
                 # LVALUE of operand_addr = operand_addr +/- 1; dest_addr = LVALUE of operand_addr

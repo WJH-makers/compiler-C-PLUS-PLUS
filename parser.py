@@ -1,10 +1,8 @@
 # coding=utf-8
 import logging
 import sys
-
 # --- 日志设置 ---
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-# logging.basicConfig(level=logging.DEBUG, format='%(levelname)s (%(filename)s:%(lineno)d): %(message)s')
 
 try:
     from compiler_ast import *
@@ -122,6 +120,12 @@ class Parser:
         while self.current_token and self._check_type_start():
             if self.current_token.value == "std" and type_parts and type_parts[0] == "std": break
             logging.debug(f"[_parse_type] Adding part: {self.current_token.value}")
+            type_parts.append(self.current_token.value)
+            self._advance()
+        if not type_parts and self.current_token and self.current_token.type == 'IDENTIFIER':
+            type_parts.append(self.current_token.value)
+            self._advance()
+        if type_parts and type_parts[-1] in ('struct', 'class', 'enum', 'union') and self.current_token and self.current_token.type == 'IDENTIFIER':
             type_parts.append(self.current_token.value)
             self._advance()
         if not type_parts: self._error("Expected type specifier keyword", token=type_token_start); return None
@@ -422,7 +426,7 @@ class Parser:
         logging.debug(f"[_parse_argument_list] Parsed arguments successfully: {args}")
         return args
 
-    def _parse_statement(self):  # ... (same as previous version) ...
+    def _parse_statement(self):
         loc_token = self.current_token
         line = loc_token.original_line if loc_token else None
         col = loc_token.column if loc_token else None
@@ -539,7 +543,8 @@ class Parser:
                 decl_type_str = self._parse_type()
                 if not decl_type_str: self._error("Invalid type in 'for' init", decl_start_token); return None
                 ptr_level = 0
-                while self._match('OPERATOR', '*'): ptr_level += 1; decl_type_str += '*' * ptr_level
+                while self._match('OPERATOR', '*'): ptr_level += 1
+                if ptr_level > 0: decl_type_str += '*' * ptr_level
                 if not self._check("IDENTIFIER"): self._error("Expected identifier in 'for' declaration",
                                                               self.current_token); return None
                 name_tok = self._consume("IDENTIFIER", "Identifier expected in for declaration")
@@ -1071,7 +1076,6 @@ _parse_external_declaration 方法实现了这里的逻辑。
 注意这里对 Declarator 的简化，实际 C++ 文法更复杂。
 
 
-
 3. 类型 (Type)
 
 代码段
@@ -1107,7 +1111,7 @@ Statement -> DeclarationStatement
            | BreakStatement
            | ContinueStatement
            | ExpressionStatement
-           | EmptyStatement // ';'
+           | EmptyStatement 
 _parse_statement 方法通过检查当前 token 类型来决定调用哪个具体的解析方法。
 EmptyStatement 和 CompoundStatement 在 _parse_statement 中直接处理或调用子方法。
 
