@@ -1,35 +1,30 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=180&section=header&text=C%2B%2B%20Subset%20Compiler&fontSize=55&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Python-based%20Compiler%20%E2%80%93%20Lexer%20%E2%86%92%20Parser%20%E2%86%92%20AST%20%E2%86%92%20Semantic%20Analysis%20%E2%86%92%20TAC&descAlignY=55&descAlign=50" width="100%" />
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=180&section=header&text=C%2B%2B%20%E5%AD%90%E9%9B%86%E7%BC%96%E8%AF%91%E5%99%A8&fontSize=55&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=%E6%AD%A3%E5%88%99%E5%88%86%E6%9E%90%20%E2%86%92%20%E9%80%92%E5%BD%92%E4%B8%8B%E9%99%8D%20%E2%86%92%20AST%20%E2%86%92%20%E8%AF%AD%E4%B9%89%E5%88%86%E6%9E%90%20%E2%86%92%20%E4%B8%89%E5%9C%B0%E5%9D%80%E7%A0%81&descAlignY=55&descAlign=50" width="100%" />
 </p>
 
-| Category | Stack |
-|----------|-------|
-| **Language** | Python 3.7+ |
-| **Parsing** | Recursive descent, hand-written |
-| **IR** | Three-Address Code (quadruples) |
-| **Target** | C++17 subset |
-| **Dependencies** | None (pure Python) |
+| 类别 | 技术栈 |
+|------|--------|
+| **语言** | Python 3.7+ |
+| **解析** | 递归下降，手写 |
+| **中间表示** | 三地址码（四元式） |
+| **目标** | C++17 子集 |
+| **依赖** | 无（纯 Python） |
 
-## 📋 Overview
+## 📋 简介
 
-A **C++ subset compiler** written entirely in **Python**, implementing the full pipeline: **preprocessor → lexer → parser → semantic analyzer → three-address code generator**. Supports C++17 features including functions, control flow, pointers, arrays, type checking, and macro preprocessing.
+纯 Python 实现的 C++ 子集编译器，完整流水线：预处理 → 词法分析 → 语法分析 → 语义分析 → 三地址码生成。支持函数、控制流、指针、数组、类型检查、宏预处理等 C++17 特性。
 
-> **Why build a compiler from scratch?** Compilers are the ultimate exercise in abstraction — text in, executable semantics out. Implementing each stage reveals how high-level language features decompose into primitive operations, and recursive descent parsing is the most intuitive path to understanding syntax-directed translation.
-
-## 🚀 Quick Start
+## 🚀 快速开始
 
 ```bash
-# Run the full compilation pipeline
+# 完整编译流水线
 python preprocess.py < input.cpp
 python lexer.py < input.cpp
 python parser.py < input.cpp
 python semantic_analyzer.py < input.cpp
 python tac_generator.py < input.cpp
-```
 
-### Test with the included sample
-
-```bash
+# 用自带示例测试
 python preprocess.py < main.cpp > preprocessed.cpp
 python lexer.py < preprocessed.cpp
 python parser.py < preprocessed.cpp
@@ -37,75 +32,61 @@ python semantic_analyzer.py < preprocessed.cpp
 python tac_generator.py < preprocessed.cpp
 ```
 
-## ✨ Key Features
+## ✨ 功能特性
 
-- **Preprocessor**: Macro expansion, `#define`/`#ifdef`/`#if`/`#include` handling
-- **Lexer**: Regex-based tokenization with full C++ keyword/operator support
-- **Parser**: Recursive descent parser producing a typed AST
-- **Semantic Analyzer**: Symbol table, type checking, scope management, const correctness
-- **TAC Generator**: Three-address code (quadruple) intermediate representation
-- **C++17 Support**: Functions, if/while/for/do-while, ternary, casts, member access
+- **预处理**：宏展开、`#define`/`#ifdef`/`#include` 处理
+- **词法分析**：正则分词，完整 C++ 关键字/运算符支持
+- **语法分析**：递归下降解析，生成带类型的 AST
+- **语义分析**：符号表、类型检查、作用域管理、常量正确性
+- **代码生成**：三地址码（四元式）中间表示
 
-## 🏗️ Compiler Pipeline
+## 🏗️ 编译流水线
 
 ```
-Source Code (C++)
-      │
-      ▼
+源代码 (C++)
+    │
+    ▼
 ┌─────────────┐
-│ Preprocessor│  → Macro expansion, #include, conditional compilation
+│  预处理     │  → 宏展开、条件编译
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
-│    Lexer    │  → Tokenization (keywords, operators, literals, identifiers)
+│  词法分析   │  → 分词（关键字、运算符、字面量、标识符）
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
-│   Parser    │  → Recursive descent → Abstract Syntax Tree (AST)
+│  语法分析   │  → 递归下降 → AST
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
-│  Semantic   │  → Symbol table, type checking, scope resolution
-│  Analyzer   │
+│  语义分析   │  → 符号表、类型检查、作用域
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
-│     TAC     │  → Three-address code generation
-│  Generator  │
+│  三地址码   │  → 四元式中间表示
 └─────────────┘
 ```
 
-## 🏗️ Module Structure
+## ❓ 常见问题
 
-| Module | File | Description |
-|--------|------|-------------|
-| **Preprocessor** | `preprocess.py` | Macro expansion, `#define`/`#ifdef`/`#include`, string operations |
-| **Lexer** | `lexer.py` | Token types, regex scanning, escape sequence handling (326 lines) |
-| **AST** | `compiler_ast.py` | AST node definitions: Program, Function, Statement, Expression (276 lines) |
-| **Parser** | `parser.py` | Recursive descent with operator precedence for C++ (800+ lines) |
-| **Semantic Analyzer** | `semantic_analyzer.py` | Symbol table, type checking, const correctness (1000+ lines) |
-| **TAC Generator** | `tac_generator.py` | Three-address code via visitor pattern (748 lines) |
+| 问题 | 回答 |
+|------|------|
+| **能编译真实 C++ 代码吗？** | 处理 C++17 子集，无模板/异常/RTTI，教学用途 |
+| **如何添加优化？** | 输出 TAC 后实现常量折叠等 TAC→TAC 变换 |
+| **如何可视化 AST？** | 使用任意 AST 可视化工具，或添加 `__repr__` 调试输出 |
 
-## ❓ FAQ
+## 🔗 相关项目
 
-| Question | Answer |
-|----------|--------|
-| **Can this compile real-world C++ code?** | It handles a C++17 subset — no templates, exceptions, or RTTI. Designed for teaching, not production. |
-| **How do I add optimization passes?** | (1) Output TAC to a file (2) Implement passes like constant folding as a TAC-to-TAC transformation (3) Pipe before the final output. |
-| **Is there a way to visualize the AST?** | Parse the `compiler_ast.py` output with any AST visualizer, or add a `__repr__` for debug printing. |
+- [xv6 OS](/WJH-makers/xv6-riscv-riscv) — 链接器/加载器概念与运行时环境
+- [RingMoE](/WJH-makers/RingMOE) — 深度学习计算图编译与大规模训练
 
-## 🔗 See Also
+## 🎓 课程背景
 
-- [xv6 OS](/WJH-makers/xv6-riscv-riscv) — Linker/loader concepts and the runtime environment
-- [RingMoE](/WJH-makers/RingMOE) — Computation graph compilation for deep learning at scale
-
-## 🎓 Academic Context
-
-This project was completed as the final project for the **Compiler Principles** course (大三) at **Wuhan University**, School of Computer Science. It demonstrates a complete understanding of compiler construction including lexical analysis, syntax analysis, semantic analysis, and intermediate code generation.
+武汉大学计算机学院 · 编译原理课程设计，大三。
 
 ---
 
