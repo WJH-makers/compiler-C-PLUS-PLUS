@@ -12,9 +12,35 @@
 
 ## 📋 Overview
 
-A **C++ subset compiler** built entirely in **Python** as a university compiler design project. Implements a complete compilation pipeline: **preprocessor** → **lexer** → **parser** → **semantic analyzer** → **three-address code generator**.
+A **C++ subset compiler** written entirely in **Python**, implementing the full pipeline: **preprocessor → lexer → parser → semantic analyzer → three-address code generator**. Supports C++17 features including functions, control flow, pointers, arrays, type checking, and macro preprocessing.
 
-Supports C++17 language features including functions, control flow, pointers, arrays, type checking, and macro preprocessing.
+> **Why build a compiler from scratch?** Compilers are the ultimate exercise in abstraction — text in, executable semantics out. Implementing each stage reveals how high-level language features decompose into primitive operations, and recursive descent parsing is the most intuitive path to understanding syntax-directed translation.
+
+## 🚀 Quick Start
+
+```bash
+# Run the full compilation pipeline
+python preprocess.py < input.cpp
+python lexer.py < input.cpp
+python parser.py < input.cpp
+python semantic_analyzer.py < input.cpp
+python tac_generator.py < input.cpp
+```
+
+### Test with the included sample
+
+```bash
+python preprocess.py < main.cpp > preprocessed.cpp
+python lexer.py < preprocessed.cpp
+python parser.py < preprocessed.cpp
+python semantic_analyzer.py < preprocessed.cpp
+python tac_generator.py < preprocessed.cpp
+```
+
+### Requirements
+
+- Python 3.7+
+- No external dependencies (pure Python)
 
 ## ✨ Key Features
 
@@ -68,32 +94,6 @@ Source Code (C++)
 | **Parser** | `parser.py` | Recursive descent with operator precedence for C++ (800+ lines) |
 | **Semantic Analyzer** | `semantic_analyzer.py` | Symbol table, type checking, const correctness (1000+ lines) |
 | **TAC Generator** | `tac_generator.py` | Three-address code via visitor pattern (748 lines) |
-
-## 🚀 Quick Start
-
-```bash
-# Run full compilation pipeline
-python preprocess.py < input.cpp
-python lexer.py < input.cpp
-python parser.py < input.cpp
-python semantic_analyzer.py < input.cpp
-python tac_generator.py < input.cpp
-```
-
-### Test with included sample
-
-```bash
-python preprocess.py < main.cpp > preprocessed.cpp
-python lexer.py < preprocessed.cpp
-python parser.py < preprocessed.cpp
-python semantic_analyzer.py < preprocessed.cpp
-python tac_generator.py < preprocessed.cpp
-```
-
-## 📦 Requirements
-
-- Python 3.7+
-- No external dependencies required (pure Python implementation)
 
 ## 🎓 Academic Context
 
