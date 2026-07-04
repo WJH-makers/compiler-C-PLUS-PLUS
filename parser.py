@@ -33,10 +33,17 @@ class ParseError(Exception):
 
 class Parser:
     def __init__(self, tokens):
+        if not tokens:
+            self._error("Empty token list")
+            self.current_token = None
+            self.peek_token = None
+            return
         self.token_iter = iter(tokens)
         self.current_token = None
         self.peek_token = None
         self._last_consumed_token_for_error = None
+        self._recursion_depth = 0
+        self._max_recursion_depth = 500
         self._advance()
         self._advance()
         self.std_namespace_is_active = False
@@ -742,9 +749,17 @@ class Parser:
         return expr
 
     def _parse_primary_expression(self):
+        self._recursion_depth += 1
+        if self._recursion_depth > self._max_recursion_depth:
+            self._error("Maximum recursion depth exceeded (possible infinite nesting)",
+                        token=self.current_token)
+            self._recursion_depth -= 1
+            return None
         token = self.current_token
-        if not token or token.type == "EOF": self._error("Unexpected EOF expecting primary expression",
-                                                         token=token); return None
+        if not token or token.type == "EOF":
+            self._error("Unexpected EOF expecting primary expression", token=token)
+            self._recursion_depth -= 1
+            return None
         line = token.original_line if token else None
         col = token.column if token else None
         node = None
@@ -787,6 +802,7 @@ class Parser:
                         if expression_to_cast is None:
                             self._error("Expected expression following C-style cast '(type)'",
                                         token=self.current_token or paren_start_token)
+                            self._recursion_depth -= 1
                             return None
                         # Now it's safe to use final_cast_type
                         node = CastExpression(final_cast_type, expression_to_cast, line=paren_line, column=paren_col)
@@ -796,15 +812,21 @@ class Parser:
                         self._error(
                             f"Expected ')' to complete cast after type '{final_cast_type}', found {self.current_token}",
                             token=self.current_token)
+                        self._recursion_depth -= 1
                         return None
             if not is_cast:
                 node = self._parse_expression()  # Parse as grouped expression
-                if node is None: self._error("Expected expression inside parentheses",
-                                             token=self.current_token or paren_start_token); return None
+                if node is None:
+                    self._error("Expected expression inside parentheses",
+                                token=self.current_token or paren_start_token)
+                    self._recursion_depth -= 1
+                    return None
                 self._consume('PUNCTUATOR', "Expected ')' to close parenthesized expression", value=')')
         else:
             self._error(f"Unexpected token, expected primary expression", token=token)
+            self._recursion_depth -= 1
             return None
+        self._recursion_depth -= 1
         return node
 
 
@@ -907,6 +929,8 @@ def print_ast_tree(node, indent="", last=True, prefix=""):
         ("prototype_params", node.prototype_params))
     node_repr = f"{node_type_name}{specific_info}{loc_info}"
     print(f"{indent}{connector}{prefix}{node_repr}")
+    if 'children_info' not in dir():
+        children_info = []
     valid_children_to_print = [(name, child) for name, child in children_info if child is not None]
     child_count = len(valid_children_to_print)
     for i, (child_name, child_node_or_list) in enumerate(valid_children_to_print):

@@ -83,7 +83,7 @@ class TACGenerator:
             return result
         except Exception as e:
             log.error(f"访问 {type(node).__name__} 节点时出错 (位于 L{getattr(node, 'line', '?')}): {e}", exc_info=True)
-            return None  # 指示此节点的TAC生成失败
+            raise  # 重新抛出，不静默跳过
 
     def generic_visit(self, node):
         """处理没有特定 visit 方法的 AST 节点类型。"""
@@ -324,7 +324,9 @@ class TACGenerator:
                 rhs_addr = self.visit(node.right)
                 if lvalue_addr_components and rhs_addr is not None:
                     base, index_or_member = lvalue_addr_components
-                    if isinstance(node.left, ArraySubscript):
+                    if isinstance(node.left, Identifier):
+                        self._emit('=', base, rhs_addr)
+                    elif isinstance(node.left, ArraySubscript):
                         self._emit('=[]', base, index_or_member, rhs_addr)
                     elif isinstance(node.left, MemberAccess):
                         # 假设成员访问('.=') 或指针成员访问('->=')

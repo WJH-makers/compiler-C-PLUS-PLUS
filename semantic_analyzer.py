@@ -145,8 +145,9 @@ class SymbolTable:
 
 # --- 类型系统定义和辅助函数 ---
 KNOWN_BASE_TYPES = {
-    'void', 'int', 'float', 'char', '_Bool',  # 基本 C 类型
+    'void', 'int', 'float', 'double', 'char', '_Bool',  # 基本 C 类型
     'string',  # 添加的 'string' 类型
+    'short', 'long', 'signed', 'unsigned', 'wchar_t',
     'std::ostream', 'manipulator'  # 用于模拟 cout, endl
 }
 
@@ -845,8 +846,8 @@ class SemanticAnalyzer:
             self.visit(node.init)
         if node.condition:
             cond_type = self.visit(node.condition)
-            is_scalar = is_numeric(cond_type) or get_pointer_base_type(cond_type) is not None
-            if cond_type != "error_type" and not is_scalar:
+            is_scalar = cond_type is not None and (is_numeric(cond_type) or get_pointer_base_type(cond_type) is not None)
+            if cond_type is not None and cond_type != "error_type" and not is_scalar:
                 self.error(f"For loop condition must be scalar type, got '{cond_type}'", node.condition)
         if node.update:
             self.visit(node.update)

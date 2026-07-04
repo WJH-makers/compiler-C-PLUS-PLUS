@@ -195,7 +195,7 @@ class BasicPreprocessor:
     def _apply_object_macros(self, line):
         changed = True
         processed_line = line
-        max_passes = 10
+        max_passes = 100
         passes = 0
         applied_in_pass = set()
         while changed and passes < max_passes:
@@ -398,6 +398,7 @@ class BasicPreprocessor:
                 original_lineno = i + 1
                 stripped_line = line.strip()
                 if not stripped_line:
+                    self.line_mapping.append((None, original_lineno))
                     continue
                 if stripped_line.startswith('#'):
                     logging.debug(f"处理指令 (原始 L{original_lineno}): {stripped_line}")
